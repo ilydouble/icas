@@ -157,27 +157,23 @@ def apply_face_mask(
 
 
 class SeverityWeightedLoss(nn.Module):
-    """Binary cross-entropy with severity weighting for positive samples.
+    """Cross-entropy with severity-weighted sample weights.
 
-    Loss = -[ w_neg * y*log(p) + w_pos * severity_weight * (1-y)*log(1-p) ]
-
-    For positive samples (y=1), the loss is weighted by severity:
-        - stenosis=0 (negative): weight = class_weight[0]
-        - stenosis=1 (mild):    weight = class_weight[1] * 1.0
-        - stenosis=2 (moderate): weight = class_weight[1] * 2.0
-        - stenosis=3 (severe):   weight = class_weight[1] * 3.0
+    Weight formula per sample:
+        negative (label=0): w = class_weight[0]
+        positive stenosis=1: w = class_weight[1] * 1.0
+        positive stenosis=2: w = class_weight[1] * 2.0
+        positive stenosis=3: w = class_weight[1] * 3.0
     """
 
     def __init__(self, class_weights: Tensor, severity_weights: dict[int, float]):
         super().__init__()
         self.register_buffer("class_weights", class_weights)
         self.severity_weights = severity_weights
+        self.ce = nn.CrossEntropyLoss(reduction="none")
 
     def forward(self, logits: Tensor, targets: Tensor, severities: Tensor) -> Tensor:
-        probs = F.softmax(logits, dim=1)
-        probs_pos = probs[:, 1].clamp(min=1e-7, max=1 - 1e-7)
-
-        ce_loss = -targets.float() * torch.log(probs_pos) - (1 - targets.float()) * torch.log(1 - probs_pos)
+        ce_loss = self.ce(logits, targets)
 
         sample_weights = torch.ones_like(ce_loss)
         for i in range(len(targets)):
