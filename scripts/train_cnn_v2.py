@@ -66,12 +66,11 @@ def parse_temperature_csv(path: Path) -> np.ndarray:
     return np.asarray(rows, dtype=np.float32)
 
 
-def load_face_mask(mask_path: Path, target_size: tuple[int, int]) -> np.ndarray:
-    """Load and resize face mask to target size."""
+def load_face_mask(mask_path: Path) -> np.ndarray:
+    """Load face mask at original resolution."""
     mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
     if mask is None:
-        return np.zeros(target_size, dtype=np.float32)
-    mask = cv2.resize(mask, (target_size[1], target_size[0]), interpolation=cv2.INTER_NEAREST)
+        return None
     return (mask > 127).astype(np.float32)
 
 
@@ -82,19 +81,33 @@ TEMP_RANGE_MAX = 45.0
 def apply_face_mask(
     temp_matrix: np.ndarray,
     mask: np.ndarray,
+    target_size: tuple[int, int],
     fill_value: float = 0.0,
 ) -> np.ndarray:
     """Apply face mask to temperature matrix with fixed-range normalization.
 
-    Temperature is normalized to [0, 1] using physiological range [20, 45] °C.
-    Values outside this range are clipped. Non-face regions are set to fill_value.
+    Steps:
+    1. Resize mask to temperature matrix size (align in temp space)
+    2. Normalize temperature using fixed range [20, 45] °C
+    3. Mask out non-face regions
+    4. Resize result to target_size
     """
-    target_h, target_w = mask.shape
-    temp_resized = cv2.resize(temp_matrix, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    temp_h, temp_w = temp_matrix.shape
 
-    temp_norm = np.clip((temp_resized - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0)
+    if mask is not None and mask.shape[0] != temp_h or mask.shape[1] != temp_w:
+        mask = cv2.resize(mask, (temp_w, temp_h), interpolation=cv2.INTER_NEAREST)
 
-    masked_temp = temp_norm * mask + fill_value * (1 - mask)
+    temp_norm = np.clip(
+        (temp_matrix - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0
+    )
+
+    if mask is not None:
+        masked_temp = temp_norm * mask + fill_value * (1 - mask)
+    else:
+        masked_temp = temp_norm
+
+    masked_temp = cv2.resize(masked_temp, (target_size[1], target_size[0]), interpolation=cv2.INTER_LINEAR)
+
     return masked_temp.astype(np.float32)
 
 
@@ -182,10 +195,10 @@ class TemperatureDataset(Dataset):
             if sample_id in self._mask_cache:
                 mask = self._mask_cache[sample_id]
             else:
-                mask = load_face_mask(mask_path, self.target_size)
+                mask = load_face_mask(mask_path)
                 self._mask_cache[sample_id] = mask
 
-            masked_temp = apply_face_mask(temp_matrix, mask, fill_value=0.0)
+            masked_temp = apply_face_mask(temp_matrix, mask, self.target_size, fill_value=0.0)
         else:
             temp_resized = cv2.resize(temp_matrix, (self.target_size[1], self.target_size[0]))
             masked_temp = np.clip(
