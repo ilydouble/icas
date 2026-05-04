@@ -8,6 +8,7 @@ Key features:
 4. Optional region attention: dual-channel input (temp + attention map)
 5. Optional multi-task learning: classification + severity regression
 6. Optional soft labels: continuous labels based on severity (0, 0.6, 0.8, 1.0)
+7. Transfer learning: MobileNetV3-Small with pretrained ImageNet weights
 
 Usage:
     python scripts/train_cnn_v2.py
@@ -16,6 +17,7 @@ Usage:
     python scripts/train_cnn_v2.py --region-attention
     python scripts/train_cnn_v2.py --multi-task --lambda-sev 0.3
     python scripts/train_cnn_v2.py --soft-label --lambda-sev 0.5
+    python scripts/train_cnn_v2.py --model mobilenet --soft-label
 """
 
 from __future__ import annotations
@@ -558,6 +560,72 @@ class DeeperCNN(nn.Module):
         return logits_cls
 
 
+class MobileNetV3Small(nn.Module):
+    """MobileNetV3-Small with pretrained weights for transfer learning.
+
+    Smallest pretrained model in torchvision (~2.5M params).
+    Adapts first conv layer for 1 or 2 channel input.
+    """
+
+    def __init__(
+        self,
+        num_classes: int = 2,
+        dropout: float = 0.3,
+        in_channels: int = 1,
+        img_size: int = 64,
+        multi_task: bool = False,
+        soft_label: bool = False,
+        pretrained: bool = True,
+    ):
+        super().__init__()
+        self.multi_task = multi_task
+        self.soft_label = soft_label
+        self.in_channels = in_channels
+
+        from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
+
+        weights = MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None
+        self.backbone = mobilenet_v3_small(weights=weights)
+
+        original_conv = self.backbone.features[0][0]
+        new_conv = nn.Conv2d(
+            in_channels,
+            original_conv.out_channels,
+            kernel_size=original_conv.kernel_size,
+            stride=original_conv.stride,
+            padding=original_conv.padding,
+            bias=False,
+        )
+        if pretrained:
+            with torch.no_grad():
+                if in_channels == 1:
+                    new_conv.weight.data = original_conv.weight.data.mean(dim=1, keepdim=True)
+                elif in_channels == 2:
+                    new_conv.weight.data[:, :2, :, :] = original_conv.weight.data[:, :2, :, :]
+                else:
+                    new_conv.weight.data = original_conv.weight.data.clone()
+        self.backbone.features[0][0] = new_conv
+
+        feature_dim = self.backbone.classifier[0].in_features
+        self.backbone.classifier = nn.Identity()
+
+        cls_out = 1 if soft_label else num_classes
+        self.classifier_head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, cls_out),
+        )
+        if multi_task:
+            self.severity_head = nn.Linear(feature_dim, 1)
+
+    def forward(self, x: Tensor) -> Tensor | tuple[Tensor, Tensor]:
+        features = self.backbone(x)
+        logits_cls = self.classifier_head(features)
+        if self.multi_task:
+            logits_sev = self.severity_head(features)
+            return logits_cls, logits_sev
+        return logits_cls
+
+
 def load_excluded_ids(path: Path | None) -> set[str]:
     if not path or not path.exists():
         return set()
@@ -732,7 +800,8 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--target-size", type=int, default=64)
-    parser.add_argument("--model", type=str, default="simple", choices=["simple", "deeper"])
+    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet"])
+    parser.add_argument("--no-pretrained", action="store_true", help="Disable pretrained weights (for mobilenet)")
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
     parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
@@ -754,6 +823,9 @@ def main():
     print(f"Use region attention: {args.region_attention}")
     print(f"Use multi-task learning: {args.multi_task}")
     print(f"Use soft labels: {args.soft_label}")
+    print(f"Model: {args.model}")
+    if args.model == "mobilenet":
+        print(f"Use pretrained: {not args.no_pretrained}")
 
     repo_root = Path(".").resolve()
 
@@ -792,7 +864,17 @@ def main():
     soft_label = args.soft_label
     multi_task = args.multi_task or args.soft_label
 
-    if args.model == "simple":
+    if args.model == "mobilenet":
+        model = MobileNetV3Small(
+            num_classes=2,
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=multi_task,
+            soft_label=soft_label,
+            pretrained=not args.no_pretrained,
+        )
+    elif args.model == "simple":
         model = SimpleCNN(
             num_classes=2,
             dropout=args.dropout,
