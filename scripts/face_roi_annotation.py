@@ -454,23 +454,27 @@ def save_overlay(
     overlays_dir = output_dir / 'overlays'
     overlays_dir.mkdir(parents=True, exist_ok=True)
 
-    overlay = image.copy()
+    # Darken the original image to make annotations stand out
+    overlay = (image * 0.4).astype(np.uint8)
 
-    # Draw face mask
+    # Draw face mask with semi-transparent fill
     if sample.face:
         face_mask = np.zeros_like(image, dtype=np.uint8)
         polygon = np.array(sample.face.polygon, dtype=np.int32)
-        cv2.fillPoly(face_mask, [polygon], (255, 200, 100))
-        overlay = cv2.addWeighted(overlay, 1.0, face_mask, 0.3, 0)
+        cv2.fillPoly(face_mask, [polygon], (100, 150, 200))
+        overlay = cv2.addWeighted(overlay, 1.0, face_mask, 0.4, 0)
 
-    # Draw ROI regions
+        # Draw face boundary with thick line
+        cv2.polylines(overlay, [polygon], True, (150, 200, 255), 3)
+
+    # Draw ROI regions with brighter colors and fills
     region_colors = {
-        'left_eye': (0, 255, 0),
-        'right_eye': (0, 255, 255),
-        'nose': (0, 255, 255),
-        'forehead': (255, 0, 255),
-        'left_cheek': (0, 165, 255),
-        'right_cheek': (203, 192, 255)
+        'left_eye': (0, 255, 0),        # Green
+        'right_eye': (0, 255, 255),     # Yellow
+        'nose': (255, 128, 0),          # Orange
+        'forehead': (255, 0, 255),      # Magenta
+        'left_cheek': (0, 200, 255),    # Light orange
+        'right_cheek': (255, 100, 255)  # Pink
     }
 
     region_labels = {
@@ -482,22 +486,56 @@ def save_overlay(
         'right_cheek': 'R cheek'
     }
 
+    # First pass: draw filled semi-transparent regions
     for region_name, region in sample.regions.items():
         color = region_colors.get(region_name, (255, 255, 255))
         polygon = np.array(region.polygon, dtype=np.int32)
-        cv2.polylines(overlay, [polygon], True, color, 2)
 
-        # Draw label at centroid
+        # Draw semi-transparent fill
+        region_mask = np.zeros_like(image, dtype=np.uint8)
+        cv2.fillPoly(region_mask, [polygon], color)
+        overlay = cv2.addWeighted(overlay, 1.0, region_mask, 0.3, 0)
+
+    # Second pass: draw outlines and labels
+    for region_name, region in sample.regions.items():
+        color = region_colors.get(region_name, (255, 255, 255))
+        polygon = np.array(region.polygon, dtype=np.int32)
+
+        # Draw thick outline
+        cv2.polylines(overlay, [polygon], True, color, 4)
+
+        # Draw label at centroid with background
         cx, cy = int(region.centroid[0]), int(region.centroid[1])
         label = region_labels.get(region_name, region_name)
-        cv2.putText(overlay, label, (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # Draw sample info
+        # Get text size for background rectangle
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.7
+        thickness = 2
+        (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+
+        # Draw background rectangle
+        cv2.rectangle(overlay,
+                     (cx - 5, cy - text_h - 5),
+                     (cx + text_w + 5, cy + baseline + 5),
+                     (0, 0, 0), -1)
+
+        # Draw text
+        cv2.putText(overlay, label, (cx, cy), font, font_scale, color, thickness)
+
+    # Draw sample info with background
     info_text = f'{sample.sample_id} | {sample.status}'
     if sample.quality.missing_regions:
         info_text += f' | Missing: {", ".join(sample.quality.missing_regions)}'
 
-    cv2.putText(overlay, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.8
+    thickness = 2
+    (text_w, text_h), baseline = cv2.getTextSize(info_text, font, font_scale, thickness)
+
+    # Draw background rectangle for info
+    cv2.rectangle(overlay, (5, 5), (text_w + 15, text_h + baseline + 15), (0, 0, 0), -1)
+    cv2.putText(overlay, info_text, (10, 30), font, font_scale, (0, 255, 255), thickness)
 
     cv2.imwrite(str(overlays_dir / f'{sample.sample_id}.jpg'), overlay)
 
