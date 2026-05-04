@@ -117,6 +117,36 @@ def load_clinical_lookup(path: Path | None) -> tuple[set[str], dict[str, list[st
     return clinical_ids, {name: sorted(set(ids)) for name, ids in name_to_ids.items()}
 
 
+def load_clinical_records(path: Path | None) -> dict[str, dict[str, str]]:
+    if not path:
+        return {}
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise RuntimeError("Reading clinical .xlsx requires pandas/openpyxl.") from exc
+
+    df = pd.read_excel(path, sheet_name=0, dtype=str).fillna("")
+    records: dict[str, dict[str, str]] = {}
+    for _, row in df.iterrows():
+        patient_id = _normalize_id(row.get("编号", ""))
+        if not patient_id:
+            continue
+        records[patient_id] = {
+            "name": str(row.get("姓名", "")).strip(),
+            "gender": str(row.get("性别", "")).strip(),
+            "age": str(row.get("年龄", "")).strip(),
+            "height": str(row.get("身高", "")).strip(),
+            "weight": str(row.get("体重", "")).strip(),
+            "waist": str(row.get("腰围", "")).strip(),
+            "hip": str(row.get("臀围", "")).strip(),
+            "neck": str(row.get("颈围", "")).strip(),
+            "has_icas": str(row.get("有无ICAS（0=无，1=有）", "")).strip(),
+            "stenosis_multiclass": str(row.get("狭窄程度多分类（0=无狭窄，1=轻度，2=中度，3=重度或闭塞）", "")).strip(),
+            "icas_detail": str(row.get("ICAS情况", "")).strip(),
+        }
+    return records
+
+
 def load_multimodal_ids(path: Path | None) -> set[str]:
     if not path or not path.exists():
         return set()
@@ -125,6 +155,39 @@ def load_multimodal_ids(path: Path | None) -> set[str]:
         if not reader.fieldnames or "patient_id" not in reader.fieldnames:
             return set()
         return {_normalize_id(row.get("patient_id", "")) for row in reader if _normalize_id(row.get("patient_id", ""))}
+
+
+def load_multimodal_records(path: Path | None) -> dict[str, dict[str, str]]:
+    if not path or not path.exists():
+        return {}
+    records: dict[str, dict[str, str]] = {}
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "patient_id" not in reader.fieldnames:
+            return records
+        for row in reader:
+            patient_id = _normalize_id(row.get("patient_id", ""))
+            if not patient_id:
+                continue
+            records[patient_id] = {
+                "label": row.get("label", "").strip(),
+                "has_icas": row.get("has_icas", "").strip(),
+                "age": row.get("age", "").strip(),
+                "gender_encoded": row.get("gender_encoded", "").strip(),
+                "height": row.get("height", "").strip(),
+                "weight": row.get("weight", "").strip(),
+                "waist": row.get("waist", "").strip(),
+                "hip": row.get("hip", "").strip(),
+                "neck": row.get("neck", "").strip(),
+                "bmi": row.get("bmi", "").strip(),
+                "waist_hip_ratio": row.get("waist_hip_ratio", "").strip(),
+                "waist_height_ratio": row.get("waist_height_ratio", "").strip(),
+                "neck_height_ratio": row.get("neck_height_ratio", "").strip(),
+                "bmi_category": row.get("bmi_category", "").strip(),
+                "age_group": row.get("age_group", "").strip(),
+            }
+    return records
+
 
 
 def analyze_sources(datasets_dir: Path, clinical_ids: set[str] | None = None) -> AnalysisResult:
@@ -255,10 +318,14 @@ def build_full_dataset(
     clinical_ids: set[str] | None = None,
     multimodal_ids: set[str] | None = None,
     name_to_clinical_ids: dict[str, list[str]] | None = None,
+    clinical_records: dict[str, dict[str, str]] | None = None,
+    multimodal_records: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, int]:
     clinical_ids = clinical_ids or set()
     multimodal_ids = multimodal_ids or set()
     name_to_clinical_ids = name_to_clinical_ids or {}
+    clinical_records = clinical_records or {}
+    multimodal_records = multimodal_records or {}
     all_known_ids = clinical_ids | multimodal_ids
     analysis = analyze_sources(datasets_dir, clinical_ids)
 
@@ -289,16 +356,19 @@ def build_full_dataset(
         included_rows.append(_full_sample_row(sample, match, image_dest, temp_dest))
 
     patient_rows = _patient_summary_rows(included_rows)
+    patient_clinical_rows = _patient_clinical_rows(patient_rows, clinical_records, multimodal_records)
     _write_csv(output_dir / "manifest.csv", _full_manifest_fields(), included_rows)
     _write_csv(output_dir / "excluded_samples.csv", _excluded_fields(), excluded_rows)
     _write_csv(output_dir / "patient_summary.csv", _patient_summary_fields(), patient_rows)
+    _write_csv(output_dir / "patient_clinical_data.csv", _patient_clinical_fields(), patient_clinical_rows)
     _write_issues(output_dir / "source_issues.csv", analysis.issues)
-    _write_full_report(output_dir / "analysis_report.md", included_rows, excluded_rows, patient_rows, analysis.issues)
+    _write_full_report(output_dir / "analysis_report.md", included_rows, excluded_rows, patient_rows, analysis.issues, patient_clinical_rows)
 
     return {
         "included_samples": len(included_rows),
         "included_patients": len(patient_rows),
         "excluded_samples": len(excluded_rows),
+        "patients_with_basic_clinical_data": sum(1 for row in patient_clinical_rows if row["has_basic_clinical_data"] == "1"),
         "copied": copied,
         "skipped_existing": skipped_existing,
         "source_issues": len(analysis.issues),
@@ -512,6 +582,38 @@ def _patient_summary_fields() -> list[str]:
     return ["canonical_patient_id", "image_count", "images_2024", "images_2025", "matched_by_values", "source_patient_ids"]
 
 
+def _patient_clinical_fields() -> list[str]:
+    return [
+        "canonical_patient_id",
+        "has_basic_clinical_data",
+        "data_sources",
+        "clinical_source_available",
+        "multimodal_source_available",
+        "name",
+        "gender",
+        "gender_encoded",
+        "age",
+        "height",
+        "weight",
+        "waist",
+        "hip",
+        "neck",
+        "bmi",
+        "waist_hip_ratio",
+        "waist_height_ratio",
+        "neck_height_ratio",
+        "bmi_category",
+        "age_group",
+        "has_icas",
+        "label",
+        "stenosis_multiclass",
+        "icas_detail",
+        "image_count",
+        "images_2024",
+        "images_2025",
+    ]
+
+
 def _patient_summary_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
@@ -532,12 +634,66 @@ def _patient_summary_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return summary_rows
 
 
+def _patient_clinical_rows(
+    patient_rows: list[dict[str, str]],
+    clinical_records: dict[str, dict[str, str]],
+    multimodal_records: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for patient in patient_rows:
+        patient_id = patient["canonical_patient_id"]
+        clinical = clinical_records.get(patient_id, {})
+        multimodal = multimodal_records.get(patient_id, {})
+        sources = []
+        if clinical:
+            sources.append("clinical")
+        if multimodal:
+            sources.append("multimodal")
+        row = {
+            "canonical_patient_id": patient_id,
+            "has_basic_clinical_data": "1" if sources else "0",
+            "data_sources": ";".join(sources),
+            "clinical_source_available": "1" if clinical else "0",
+            "multimodal_source_available": "1" if multimodal else "0",
+            "name": clinical.get("name", ""),
+            "gender": clinical.get("gender", ""),
+            "gender_encoded": multimodal.get("gender_encoded", ""),
+            "age": _prefer(clinical, multimodal, "age"),
+            "height": _prefer(clinical, multimodal, "height"),
+            "weight": _prefer(clinical, multimodal, "weight"),
+            "waist": _prefer(clinical, multimodal, "waist"),
+            "hip": _prefer(clinical, multimodal, "hip"),
+            "neck": _prefer(clinical, multimodal, "neck"),
+            "bmi": multimodal.get("bmi", ""),
+            "waist_hip_ratio": multimodal.get("waist_hip_ratio", ""),
+            "waist_height_ratio": multimodal.get("waist_height_ratio", ""),
+            "neck_height_ratio": multimodal.get("neck_height_ratio", ""),
+            "bmi_category": multimodal.get("bmi_category", ""),
+            "age_group": multimodal.get("age_group", ""),
+            "has_icas": _prefer(clinical, multimodal, "has_icas"),
+            "label": multimodal.get("label", ""),
+            "stenosis_multiclass": clinical.get("stenosis_multiclass", ""),
+            "icas_detail": clinical.get("icas_detail", ""),
+            "image_count": patient["image_count"],
+            "images_2024": patient["images_2024"],
+            "images_2025": patient["images_2025"],
+        }
+        rows.append(row)
+    return rows
+
+
+def _prefer(primary: dict[str, str], fallback: dict[str, str], key: str) -> str:
+    value = primary.get(key, "")
+    return value if value not in {"", "missing"} else fallback.get(key, "")
+
+
 def _write_full_report(
     path: Path,
     included_rows: list[dict[str, str]],
     excluded_rows: list[dict[str, str]],
     patient_rows: list[dict[str, str]],
     source_issues: list[Issue],
+    patient_clinical_rows: list[dict[str, str]],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     total_2024 = sum(1 for row in included_rows if row["year"] == "2024")
@@ -554,6 +710,9 @@ def _write_full_report(
         image_count_distribution[row["image_count"]] = image_count_distribution.get(row["image_count"], 0) + 1
         pattern = f"2024={row['images_2024']},2025={row['images_2025']}"
         year_pattern_distribution[pattern] = year_pattern_distribution.get(pattern, 0) + 1
+    clinical_data_count = sum(1 for row in patient_clinical_rows if row["has_basic_clinical_data"] == "1")
+    clinical_source_count = sum(1 for row in patient_clinical_rows if row["clinical_source_available"] == "1")
+    multimodal_source_count = sum(1 for row in patient_clinical_rows if row["multimodal_source_available"] == "1")
 
     lines = [
         "# full_data 数据集分析报告",
@@ -566,6 +725,9 @@ def _write_full_report(
         f"- 2025 图像样本数: {total_2025}",
         f"- 排除可提取样本数: {len(excluded_rows)}",
         f"- 原始数据源问题日志数: {len(source_issues)}",
+        f"- 有基础临床数据患者数: {clinical_data_count}",
+        f"- 来自临床特征表的患者数: {clinical_source_count}",
+        f"- 来自 patient_level_multimodal_data.csv 的患者数: {multimodal_source_count}",
         "",
         "## 纳入规则",
         "",
@@ -608,6 +770,7 @@ def _write_full_report(
     lines.extend([
         "- `manifest.csv`: 纳入样本明细。",
         "- `patient_summary.csv`: 患者级图像数量统计，包含每位患者总图像数、2024 图像数、2025 图像数。",
+        "- `patient_clinical_data.csv`: 538 位纳入患者的基础临床数据合并表，优先取临床特征表，缺失时用多模态表补充。",
         "- `excluded_samples.csv`: 可提取但未纳入的样本及原因。",
         "- `source_issues.csv`: 原始数据配对/命名问题日志。",
         "- `images/`: 复制后的图像文件。",
@@ -671,7 +834,9 @@ def main() -> None:
     elif args.command == "build-full":
         clinical_ids, name_to_clinical_ids = load_clinical_lookup(args.clinical_xlsx)
         multimodal_ids = load_multimodal_ids(args.multimodal_csv)
-        result = build_full_dataset(args.datasets, args.output, clinical_ids, multimodal_ids, name_to_clinical_ids)
+        clinical_records = load_clinical_records(args.clinical_xlsx)
+        multimodal_records = load_multimodal_records(args.multimodal_csv)
+        result = build_full_dataset(args.datasets, args.output, clinical_ids, multimodal_ids, name_to_clinical_ids, clinical_records, multimodal_records)
         print(result)
 
 
