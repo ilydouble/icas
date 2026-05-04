@@ -480,7 +480,7 @@ def main() -> None:
     parser.add_argument(
         "--annotations",
         type=Path,
-        default=Path("datasets/full_data/face_roi_annotations/annotations.json"),
+        default=Path("outputs/annotations/annotations.json"),
     )
     parser.add_argument(
         "--excluded",

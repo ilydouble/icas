@@ -13,8 +13,6 @@
 .DS_Store
 # 完全排除所有文本文件
 *.txt
-dataset/**/*.txt
-dataset/**/*.csv
 
 # Logs
 logs/
