@@ -69,7 +69,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -256,9 +256,13 @@ def apply_split(df: pd.DataFrame, split: dict) -> tuple:
     """Return arrays for train/val/test, including stenosis severity for weighting.
 
     Returns:
-        X_tr, y_tr, sev_tr,   – train features, labels, stenosis severity
-        X_va, y_va,           – val features, labels
-        X_te, y_te            – test features, labels
+        X_tr, y_tr, sev_tr, groups_tr – train features, labels, severity, patient IDs
+        X_va, y_va,                   – val features, labels
+        X_te, y_te                    – test features, labels
+
+    `groups_tr` is an integer array of patient group indices for the training set.
+    It is passed to GridSearchCV so that StratifiedGroupKFold can ensure no patient
+    appears in both the inner CV training and validation folds.
     """
     label_cols = {"label", "stenosis_multiclass", "canonical_patient_id"}
     feat_cols = [c for c in df.columns if c not in FEATURE_META_COLS and c not in label_cols]
@@ -268,12 +272,18 @@ def apply_split(df: pd.DataFrame, split: dict) -> tuple:
         X = sub[feat_cols].values.astype(np.float32)
         y = sub["label"].values.astype(int)
         sev = sub["stenosis_multiclass"].values  # may contain NaN
-        return X, y, sev
+        pids = sub["patient_id"].values
+        return X, y, sev, pids
 
-    X_tr, y_tr, sev_tr = arrays(split["train_patient_ids"])
-    X_va, y_va, _      = arrays(split["val_patient_ids"])
-    X_te, y_te, _      = arrays(split["test_patient_ids"])
-    return X_tr, y_tr, sev_tr, X_va, y_va, X_te, y_te
+    X_tr, y_tr, sev_tr, pids_tr = arrays(split["train_patient_ids"])
+    X_va, y_va, _, _             = arrays(split["val_patient_ids"])
+    X_te, y_te, _, _             = arrays(split["test_patient_ids"])
+
+    # Encode patient IDs as integer group indices required by StratifiedGroupKFold.
+    unique_pids, groups_tr = np.unique(pids_tr, return_inverse=True)
+    _ = unique_pids  # not used further; groups_tr carries the grouping info
+
+    return X_tr, y_tr, sev_tr, groups_tr, X_va, y_va, X_te, y_te
 
 
 def compute_severity_weights(y: np.ndarray, stenosis: np.ndarray) -> np.ndarray:
@@ -337,23 +347,32 @@ def score_split(pipeline, X, y, prefix: str) -> dict:
 
 def _fit(pipe: Pipeline, X_tr, y_tr,
          param_grid: dict, do_search: bool, cv_folds: int,
-         sample_weight=None) -> tuple:
+         sample_weight=None, groups=None) -> tuple:
     """Fit pipeline, optionally with GridSearchCV.
 
     Returns (best_estimator, best_params, cv_auc_roc).
-    `cv_auc_roc` is GridSearchCV's best_score_ (mean ROC-AUC across CV folds on
-    the training set).  It is used for model selection so that val/test sets are
-    never touched during selection.  Returns nan when do_search=False.
+
+    When `groups` is provided (integer patient-group indices), the inner CV uses
+    StratifiedGroupKFold so that no patient's samples appear in both the training
+    and validation portions of the same fold.  This prevents the cv_auc from being
+    inflated by within-patient temperature pattern memorisation.
+
+    `cv_auc_roc` is GridSearchCV's best_score_ and is the model-selection criterion.
+    Val/test sets are never used during selection.  Returns nan when do_search=False.
     """
     fit_kwargs = {}
     if sample_weight is not None:
         fit_kwargs["clf__sample_weight"] = sample_weight
 
     if do_search:
-        cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        if groups is not None:
+            # Patient-aware CV: each patient stays entirely in one fold.
+            cv = StratifiedGroupKFold(n_splits=cv_folds)
+        else:
+            cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
         gs = GridSearchCV(pipe, param_grid, scoring="roc_auc",
                           cv=cv, n_jobs=-1, refit=True)
-        gs.fit(X_tr, y_tr, **fit_kwargs)
+        gs.fit(X_tr, y_tr, groups=groups, **fit_kwargs)
         return gs.best_estimator_, gs.best_params_, float(gs.best_score_)
     else:
         pipe.fit(X_tr, y_tr, **fit_kwargs)
@@ -363,7 +382,7 @@ def _fit(pipe: Pipeline, X_tr, y_tr,
 def run_one_model_strategy(
     cfg: dict,
     strategy: str,
-    X_tr, y_tr, sev_tr,
+    X_tr, y_tr, sev_tr, groups_tr,
     X_va, y_va,
     X_te, y_te,
     do_search: bool,
@@ -371,7 +390,7 @@ def run_one_model_strategy(
 ) -> dict:
     """Train and evaluate one (model, strategy) combination.
 
-    Model selection uses `cv_auc_roc` (training-set cross-validation score).
+    Model selection uses `cv_auc_roc` (patient-grouped CV on training set).
     Val and test scores are recorded for reporting only.
     """
     if strategy == "standard":
@@ -382,13 +401,14 @@ def run_one_model_strategy(
         sw = compute_severity_weights(y_tr, sev_tr)
 
     best, best_params, cv_auc = _fit(pipe, X_tr, y_tr, cfg["param_grid"],
-                                     do_search, cv_folds, sample_weight=sw)
+                                     do_search, cv_folds,
+                                     sample_weight=sw, groups=groups_tr)
 
     row = {
         "model": cfg["name"],
         "strategy": strategy,
         "best_params": json.dumps(best_params, ensure_ascii=False),
-        "cv_auc_roc": cv_auc,   # training-CV score → used for model selection
+        "cv_auc_roc": cv_auc,   # patient-grouped CV score → used for model selection
     }
     row.update(score_split(best, X_va, y_va, prefix="val"))
     row.update(score_split(best, X_te, y_te, prefix="test"))
@@ -408,14 +428,16 @@ def run_comparison(data: dict, do_search: bool, cv_folds: int) -> list[dict]:
     df    = data["df"]
     split = data["split"]
 
-    X_tr, y_tr, sev_tr, X_va, y_va, X_te, y_te = apply_split(df, split)
+    X_tr, y_tr, sev_tr, groups_tr, X_va, y_va, X_te, y_te = apply_split(df, split)
+    n_groups = int(np.unique(groups_tr).size)
 
     print(f"\n{'='*60}")
     print("Task: binary ICAS classification  (label: 0=no ICAS, 1=ICAS)")
-    print(f"  Train : {len(y_tr)} samples  (pos={int((y_tr==1).sum())}, "
-          f"neg={int((y_tr==0).sum())})")
+    print(f"  Train : {len(y_tr)} samples / {n_groups} patients  "
+          f"(pos={int((y_tr==1).sum())}, neg={int((y_tr==0).sum())})")
     print(f"  Val   : {len(y_va)} samples  (pos={int((y_va==1).sum())})")
     print(f"  Test  : {len(y_te)} samples  (pos={int((y_te==1).sum())})")
+    print(f"  Inner CV: StratifiedGroupKFold (patient-grouped, no within-patient leakage)")
     print(f"\n  Severity-weighted: neg→1.0, mild→{_pos_w(y_tr,1):.2f}, "
           f"mod→{_pos_w(y_tr,2):.2f}, severe→{_pos_w(y_tr,3):.2f}")
     print(f"{'='*60}")
@@ -430,7 +452,7 @@ def run_comparison(data: dict, do_search: bool, cv_folds: int) -> list[dict]:
             try:
                 row = run_one_model_strategy(
                     cfg, strategy,
-                    X_tr, y_tr, sev_tr,
+                    X_tr, y_tr, sev_tr, groups_tr,
                     X_va, y_va,
                     X_te, y_te,
                     do_search, cv_folds,

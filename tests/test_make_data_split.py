@@ -177,8 +177,9 @@ class ApplySplitTests(unittest.TestCase):
             "val_patient_ids": ["P003"],
             "test_patient_ids": ["P004"],
         }
-        X_tr, y_tr, sev_tr, X_va, y_va, X_te, y_te = apply_split(df, split)
+        X_tr, y_tr, sev_tr, groups_tr, X_va, y_va, X_te, y_te = apply_split(df, split)
         self.assertEqual(len(X_tr), 2)
+        self.assertEqual(len(groups_tr), 2)  # one group index per training sample
         self.assertEqual(len(X_va), 1)
         self.assertEqual(len(X_te), 1)
 
