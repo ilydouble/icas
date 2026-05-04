@@ -185,7 +185,7 @@ class TemperatureDataset(Dataset):
                 mask = load_face_mask(mask_path, self.target_size)
                 self._mask_cache[sample_id] = mask
 
-            masked_temp = apply_face_mask(temp_matrix, mask, fill_value=0.0, normalize=True)
+            masked_temp = apply_face_mask(temp_matrix, mask, fill_value=0.0)
         else:
             temp_resized = cv2.resize(temp_matrix, (self.target_size[1], self.target_size[0]))
             masked_temp = np.clip(
