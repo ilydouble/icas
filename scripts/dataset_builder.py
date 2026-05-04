@@ -15,6 +15,7 @@ from typing import Iterable
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 PATIENT_ID_RE = re.compile(r"^(?:\d{3}[A-Z]{2}|[A-Z]{1,3}\d{3})")
 VIEW_RE = re.compile(r"^(?P<raw_patient>.+?)-(?P<view>正|仰|左|右)-?(?P<sequence>\d+)$")
+CHINESE_NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,5}")
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,16 @@ class Issue:
     code: str
     message: str
     path: str = ""
+
+
+@dataclass(frozen=True)
+class MatchInfo:
+    canonical_patient_id: str
+    matched_by: str
+    matched_name: str = ""
+    clinical_available: bool = False
+    multimodal_available: bool = False
+    notes: str = ""
 
 
 @dataclass
@@ -85,6 +96,35 @@ def load_clinical_ids(path: Path | None) -> set[str]:
 
     df = pd.read_excel(path, sheet_name=0, usecols=["编号"], dtype={"编号": str})
     return {str(value).strip().upper() for value in df["编号"].dropna() if str(value).strip()}
+
+
+def load_clinical_lookup(path: Path | None) -> tuple[set[str], dict[str, list[str]]]:
+    if not path:
+        return set(), {}
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise RuntimeError("Reading clinical .xlsx requires pandas/openpyxl.") from exc
+
+    df = pd.read_excel(path, sheet_name=0, usecols=["编号", "姓名"], dtype=str).fillna("")
+    clinical_ids = {_normalize_id(value) for value in df["编号"] if _normalize_id(value)}
+    name_to_ids: dict[str, list[str]] = {}
+    for _, row in df.iterrows():
+        patient_id = _normalize_id(row["编号"])
+        name = _normalize_name(row["姓名"])
+        if patient_id and name:
+            name_to_ids.setdefault(name, []).append(patient_id)
+    return clinical_ids, {name: sorted(set(ids)) for name, ids in name_to_ids.items()}
+
+
+def load_multimodal_ids(path: Path | None) -> set[str]:
+    if not path or not path.exists():
+        return set()
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "patient_id" not in reader.fieldnames:
+            return set()
+        return {_normalize_id(row.get("patient_id", "")) for row in reader if _normalize_id(row.get("patient_id", ""))}
 
 
 def analyze_sources(datasets_dir: Path, clinical_ids: set[str] | None = None) -> AnalysisResult:
@@ -209,6 +249,62 @@ def build_dataset(datasets_dir: Path, output_dir: Path, clinical_ids: set[str] |
     return {"samples": len(analysis.samples), "copied": copied, "skipped_existing": skipped_existing, "issues": len(analysis.issues)}
 
 
+def build_full_dataset(
+    datasets_dir: Path,
+    output_dir: Path,
+    clinical_ids: set[str] | None = None,
+    multimodal_ids: set[str] | None = None,
+    name_to_clinical_ids: dict[str, list[str]] | None = None,
+) -> dict[str, int]:
+    clinical_ids = clinical_ids or set()
+    multimodal_ids = multimodal_ids or set()
+    name_to_clinical_ids = name_to_clinical_ids or {}
+    all_known_ids = clinical_ids | multimodal_ids
+    analysis = analyze_sources(datasets_dir, clinical_ids)
+
+    image_out = output_dir / "images"
+    temperature_out = output_dir / "temperature"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_out.mkdir(parents=True, exist_ok=True)
+    temperature_out.mkdir(parents=True, exist_ok=True)
+
+    included_rows: list[dict[str, str]] = []
+    excluded_rows: list[dict[str, str]] = []
+    copied = 0
+    skipped_existing = 0
+
+    for sample in analysis.samples:
+        match = _match_sample(sample, all_known_ids, clinical_ids, multimodal_ids, name_to_clinical_ids)
+        if match is None:
+            excluded_rows.append(_excluded_row(sample, "no_patient_info_match", "No patient info found by patient_id or extracted name."))
+            continue
+
+        sample_stem = f"{sample.year}_{match.canonical_patient_id}_{sample.sequence}"
+        image_dest = image_out / f"{sample_stem}{sample.image_path.suffix.lower()}"
+        temp_dest = temperature_out / f"{sample_stem}.csv"
+        image_copied = _copy_once(sample.image_path, image_dest)
+        temp_copied = _copy_once(sample.temperature_path, temp_dest)
+        copied += image_copied + temp_copied
+        skipped_existing += int(image_copied == 0) + int(temp_copied == 0)
+        included_rows.append(_full_sample_row(sample, match, image_dest, temp_dest))
+
+    patient_rows = _patient_summary_rows(included_rows)
+    _write_csv(output_dir / "manifest.csv", _full_manifest_fields(), included_rows)
+    _write_csv(output_dir / "excluded_samples.csv", _excluded_fields(), excluded_rows)
+    _write_csv(output_dir / "patient_summary.csv", _patient_summary_fields(), patient_rows)
+    _write_issues(output_dir / "source_issues.csv", analysis.issues)
+    _write_full_report(output_dir / "analysis_report.md", included_rows, excluded_rows, patient_rows, analysis.issues)
+
+    return {
+        "included_samples": len(included_rows),
+        "included_patients": len(patient_rows),
+        "excluded_samples": len(excluded_rows),
+        "copied": copied,
+        "skipped_existing": skipped_existing,
+        "source_issues": len(analysis.issues),
+    }
+
+
 def write_report(analysis: AnalysisResult, report_path: Path, issues_path: Path | None = None, selected_path: Path | None = None) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     issue_counts: dict[str, int] = {}
@@ -266,6 +362,67 @@ def write_report(analysis: AnalysisResult, report_path: Path, issues_path: Path 
         _write_manifest(selected_path, [_sample_row(sample, sample.image_path, sample.temperature_path) for sample in analysis.samples])
 
 
+def _normalize_id(value: object) -> str:
+    return str(value).strip().upper()
+
+
+def _normalize_name(value: object) -> str:
+    return re.sub(r"\s+", "", str(value).strip())
+
+
+def _clean_name_candidate(text: str) -> str:
+    text = re.sub(r"[（(]有重名[）)]", "", str(text))
+    text = re.sub(r"\s+", "", text)
+    if "+" in text:
+        text = re.sub(r"^.*?\+\d*", "", text)
+    text = re.sub(r"^\d+", "", text)
+    text = re.sub(r"^[A-Z]{1,3}\d{3}", "", text, flags=re.IGNORECASE)
+    text = text.strip("_-")
+    matches = CHINESE_NAME_RE.findall(text)
+    return matches[-1] if matches else ""
+
+
+def _sample_candidate_name(sample: Sample) -> str:
+    patient_name = _clean_name_candidate(sample.patient_id)
+    if patient_name:
+        return patient_name
+    stem = re.sub(r"-(正|仰|左|右)-?\d+$", "", sample.image_path.stem)
+    stem = re.sub(r"(正|仰|左|右)-?\d+$", "", stem)
+    return _clean_name_candidate(stem)
+
+
+def _match_sample(
+    sample: Sample,
+    all_known_ids: set[str],
+    clinical_ids: set[str],
+    multimodal_ids: set[str],
+    name_to_clinical_ids: dict[str, list[str]],
+) -> MatchInfo | None:
+    patient_id = _normalize_id(sample.patient_id)
+    if patient_id in all_known_ids:
+        return MatchInfo(
+            canonical_patient_id=patient_id,
+            matched_by="patient_id",
+            clinical_available=patient_id in clinical_ids,
+            multimodal_available=patient_id in multimodal_ids,
+        )
+
+    candidate_name = _sample_candidate_name(sample)
+    candidate_ids = name_to_clinical_ids.get(candidate_name, []) if candidate_name else []
+    if len(candidate_ids) == 1:
+        canonical_id = candidate_ids[0]
+        return MatchInfo(
+            canonical_patient_id=canonical_id,
+            matched_by="name",
+            matched_name=candidate_name,
+            clinical_available=canonical_id in clinical_ids,
+            multimodal_available=canonical_id in multimodal_ids,
+        )
+    if len(candidate_ids) > 1:
+        return None
+    return None
+
+
 def _iter_files(root: Path, extensions: set[str]) -> Iterable[Path]:
     for path in root.iterdir():
         if path.is_file() and path.suffix.lower() in extensions:
@@ -292,6 +449,171 @@ def _sample_row(sample: Sample, image_path: Path, temperature_path: Path) -> dic
         "source_image_path": str(sample.image_path),
         "source_temperature_path": str(sample.temperature_path),
     }
+
+
+def _full_sample_row(sample: Sample, match: MatchInfo, image_path: Path, temperature_path: Path) -> dict[str, str]:
+    return {
+        "sample_id": f"{sample.year}_{match.canonical_patient_id}_{sample.sequence}",
+        "canonical_patient_id": match.canonical_patient_id,
+        "source_patient_id": sample.patient_id,
+        "year": sample.year,
+        "view": sample.view,
+        "sequence": str(sample.sequence),
+        "matched_by": match.matched_by,
+        "matched_name": match.matched_name,
+        "clinical_available": "1" if match.clinical_available else "0",
+        "multimodal_available": "1" if match.multimodal_available else "0",
+        "image_path": str(image_path),
+        "temperature_path": str(temperature_path),
+        "source_image_path": str(sample.image_path),
+        "source_temperature_path": str(sample.temperature_path),
+    }
+
+
+def _excluded_row(sample: Sample, reason_code: str, reason: str) -> dict[str, str]:
+    candidate_name = _sample_candidate_name(sample)
+    return {
+        "patient_id": sample.patient_id,
+        "candidate_name": candidate_name,
+        "year": sample.year,
+        "view": sample.view,
+        "sequence": str(sample.sequence),
+        "reason_code": reason_code,
+        "reason": reason,
+        "source_image_path": str(sample.image_path),
+        "source_temperature_path": str(sample.temperature_path),
+    }
+
+
+def _full_manifest_fields() -> list[str]:
+    return [
+        "sample_id",
+        "canonical_patient_id",
+        "source_patient_id",
+        "year",
+        "view",
+        "sequence",
+        "matched_by",
+        "matched_name",
+        "clinical_available",
+        "multimodal_available",
+        "image_path",
+        "temperature_path",
+        "source_image_path",
+        "source_temperature_path",
+    ]
+
+
+def _excluded_fields() -> list[str]:
+    return ["patient_id", "candidate_name", "year", "view", "sequence", "reason_code", "reason", "source_image_path", "source_temperature_path"]
+
+
+def _patient_summary_fields() -> list[str]:
+    return ["canonical_patient_id", "image_count", "images_2024", "images_2025", "matched_by_values", "source_patient_ids"]
+
+
+def _patient_summary_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    grouped: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        grouped.setdefault(row["canonical_patient_id"], []).append(row)
+
+    summary_rows = []
+    for patient_id, patient_rows in sorted(grouped.items()):
+        images_2024 = sum(1 for row in patient_rows if row["year"] == "2024")
+        images_2025 = sum(1 for row in patient_rows if row["year"] == "2025")
+        summary_rows.append({
+            "canonical_patient_id": patient_id,
+            "image_count": str(len(patient_rows)),
+            "images_2024": str(images_2024),
+            "images_2025": str(images_2025),
+            "matched_by_values": ";".join(sorted({row["matched_by"] for row in patient_rows})),
+            "source_patient_ids": ";".join(sorted({row["source_patient_id"] for row in patient_rows})),
+        })
+    return summary_rows
+
+
+def _write_full_report(
+    path: Path,
+    included_rows: list[dict[str, str]],
+    excluded_rows: list[dict[str, str]],
+    patient_rows: list[dict[str, str]],
+    source_issues: list[Issue],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    total_2024 = sum(1 for row in included_rows if row["year"] == "2024")
+    total_2025 = sum(1 for row in included_rows if row["year"] == "2025")
+    matched_by_counts: dict[str, int] = {}
+    for row in included_rows:
+        matched_by_counts[row["matched_by"]] = matched_by_counts.get(row["matched_by"], 0) + 1
+    excluded_counts: dict[str, int] = {}
+    for row in excluded_rows:
+        excluded_counts[row["reason_code"]] = excluded_counts.get(row["reason_code"], 0) + 1
+    image_count_distribution: dict[str, int] = {}
+    year_pattern_distribution: dict[str, int] = {}
+    for row in patient_rows:
+        image_count_distribution[row["image_count"]] = image_count_distribution.get(row["image_count"], 0) + 1
+        pattern = f"2024={row['images_2024']},2025={row['images_2025']}"
+        year_pattern_distribution[pattern] = year_pattern_distribution.get(pattern, 0) + 1
+
+    lines = [
+        "# full_data 数据集分析报告",
+        "",
+        "## 汇总",
+        "",
+        f"- 纳入患者数: {len(patient_rows)}",
+        f"- 纳入图像样本数: {len(included_rows)}",
+        f"- 2024 图像样本数: {total_2024}",
+        f"- 2025 图像样本数: {total_2025}",
+        f"- 排除可提取样本数: {len(excluded_rows)}",
+        f"- 原始数据源问题日志数: {len(source_issues)}",
+        "",
+        "## 纳入规则",
+        "",
+        "- 先按患者编号匹配临床特征表或 `patient_level_multimodal_data.csv`。",
+        "- 编号匹配不到时，从患者目录名或文件名抽取中文姓名；若姓名在临床表中唯一匹配，则纳入并使用临床表编号作为 canonical_patient_id。",
+        "- 编号和姓名都无法匹配，或姓名匹配存在歧义，则不纳入训练数据，并写入 `excluded_samples.csv`。",
+        "",
+        "## 纳入方式分布",
+        "",
+    ]
+    for key, count in sorted(matched_by_counts.items()):
+        lines.append(f"- {key}: {count}")
+    lines.extend(["", "## 排除原因", ""])
+    if excluded_counts:
+        for key, count in sorted(excluded_counts.items()):
+            lines.append(f"- {key}: {count}")
+    else:
+        lines.append("- 无")
+    excluded_patient_reasons: dict[str, set[str]] = {}
+    for row in excluded_rows:
+        excluded_patient_reasons.setdefault(row["patient_id"], set()).add(row["reason_code"])
+    lines.extend(["", "## 未纳入患者", ""])
+    if excluded_patient_reasons:
+        for patient_id, reasons in sorted(excluded_patient_reasons.items()):
+            patient_excluded_rows = [row for row in excluded_rows if row["patient_id"] == patient_id]
+            years = ",".join(sorted({row["year"] for row in patient_excluded_rows}))
+            sequences = ",".join(row["sequence"] for row in patient_excluded_rows)
+            candidate_names = sorted({row["candidate_name"] for row in patient_excluded_rows if row["candidate_name"]})
+            name_text = f"，候选姓名: {';'.join(candidate_names)}" if candidate_names else ""
+            lines.append(f"- {patient_id}: {len(patient_excluded_rows)} 张未纳入，年份: {years}，序号: {sequences}，原因: {';'.join(sorted(reasons))}{name_text}")
+    else:
+        lines.append("- 无")
+    lines.extend(["", "## 每位患者图像数量分布", ""])
+    for image_count, patient_count in sorted(image_count_distribution.items(), key=lambda item: int(item[0])):
+        lines.append(f"- {image_count} 张: {patient_count} 位患者")
+    lines.extend(["", "## 2024/2025 图像组合分布", ""])
+    for pattern, patient_count in sorted(year_pattern_distribution.items()):
+        lines.append(f"- {pattern}: {patient_count} 位患者")
+    lines.extend(["", "## 输出文件", ""])
+    lines.extend([
+        "- `manifest.csv`: 纳入样本明细。",
+        "- `patient_summary.csv`: 患者级图像数量统计，包含每位患者总图像数、2024 图像数、2025 图像数。",
+        "- `excluded_samples.csv`: 可提取但未纳入的样本及原因。",
+        "- `source_issues.csv`: 原始数据配对/命名问题日志。",
+        "- `images/`: 复制后的图像文件。",
+        "- `temperature/`: 复制后的温度 CSV 文件。",
+    ])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
@@ -328,17 +650,28 @@ def main() -> None:
     build_parser.add_argument("--clinical-xlsx", type=Path)
     build_parser.add_argument("--output", type=Path, default=Path("processed/icas_dataset"))
 
-    args = parser.parse_args()
-    clinical_ids = load_clinical_ids(args.clinical_xlsx)
+    full_parser = subparsers.add_parser("build-full", help="Build the maximally matched full_data dataset.")
+    full_parser.add_argument("--datasets", type=Path, default=Path("datasets"))
+    full_parser.add_argument("--clinical-xlsx", type=Path, default=Path("datasets/临床特征核对后最终版.xlsx"))
+    full_parser.add_argument("--multimodal-csv", type=Path, default=Path("datasets/patient_level_multimodal_data.csv"))
+    full_parser.add_argument("--output", type=Path, default=Path("datasets/full_data"))
 
+    args = parser.parse_args()
     if args.command == "analyze":
+        clinical_ids = load_clinical_ids(args.clinical_xlsx)
         analysis = analyze_sources(args.datasets, clinical_ids)
         write_report(analysis, args.report, args.issues, args.selected)
         print(f"Wrote report: {args.report}")
         print(f"Selected samples: {analysis.summary['selected_samples']}")
         print(f"Issues: {analysis.summary['issues']}")
     elif args.command == "build":
+        clinical_ids = load_clinical_ids(args.clinical_xlsx)
         result = build_dataset(args.datasets, args.output, clinical_ids)
+        print(result)
+    elif args.command == "build-full":
+        clinical_ids, name_to_clinical_ids = load_clinical_lookup(args.clinical_xlsx)
+        multimodal_ids = load_multimodal_ids(args.multimodal_csv)
+        result = build_full_dataset(args.datasets, args.output, clinical_ids, multimodal_ids, name_to_clinical_ids)
         print(result)
 
 

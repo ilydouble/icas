@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.dataset_builder import (
     analyze_sources,
     build_dataset,
+    build_full_dataset,
     parse_2025_stem,
     parse_sequence_for_patient,
 )
@@ -67,6 +68,46 @@ class DatasetBuilderTests(unittest.TestCase):
             with (output / "manifest.csv").open(encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             self.assertEqual([row["sample_id"] for row in rows], ["2024_001BD_1", "2025_003ED_1", "2025_003ED_2"])
+
+    def test_full_dataset_includes_id_and_name_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            datasets = root / "datasets"
+            for patient_id in ["001BD", "BY019", "QIU GUOFU邱国福", "UNKNOWN"]:
+                patient_dir = datasets / "2024" / patient_id
+                patient_dir.mkdir(parents=True)
+                (patient_dir / f"{patient_id}1.jpg").write_text("jpg", encoding="utf-8")
+                (patient_dir / f"{patient_id}1.csv").write_text("csv", encoding="utf-8")
+
+            photo_dir = datasets / "2025" / "热成像照片"
+            temp_dir = datasets / "2025" / "热成像温度数据"
+            photo_dir.mkdir(parents=True)
+            temp_dir.mkdir(parents=True)
+            for stem in ["CH046-正-1", "CH046-正-2"]:
+                (photo_dir / f"{stem}.jpg").write_text("jpg", encoding="utf-8")
+                (temp_dir / f"{stem}.csv").write_text("csv", encoding="utf-8")
+
+            output = root / "full_data"
+            result = build_full_dataset(
+                datasets,
+                output,
+                clinical_ids={"001BD", "CH046"},
+                multimodal_ids={"BY019"},
+                name_to_clinical_ids={"邱国福": ["CH046"]},
+            )
+
+            self.assertEqual(result["included_samples"], 5)
+            self.assertEqual(result["included_patients"], 3)
+            self.assertEqual(result["excluded_samples"], 1)
+
+            with (output / "manifest.csv").open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual([row["canonical_patient_id"] for row in rows], ["001BD", "BY019", "CH046", "CH046", "CH046"])
+            self.assertEqual(rows[2]["matched_by"], "name")
+
+            with (output / "excluded_samples.csv").open(encoding="utf-8") as f:
+                excluded = list(csv.DictReader(f))
+            self.assertEqual(excluded[0]["patient_id"], "UNKNOWN")
 
 
 if __name__ == "__main__":
