@@ -7,6 +7,7 @@ Key features:
 3. Severity-weighted loss: positive samples weighted by stenosis severity
 4. Optional region attention: dual-channel input (temp + attention map)
 5. Optional multi-task learning: classification + severity regression
+6. Optional soft labels: continuous labels based on severity (0, 0.6, 0.8, 1.0)
 
 Usage:
     python scripts/train_cnn_v2.py
@@ -14,6 +15,7 @@ Usage:
     python scripts/train_cnn_v2.py --augment
     python scripts/train_cnn_v2.py --region-attention
     python scripts/train_cnn_v2.py --multi-task --lambda-sev 0.3
+    python scripts/train_cnn_v2.py --soft-label --lambda-sev 0.5
 """
 
 from __future__ import annotations
@@ -278,6 +280,61 @@ class MultiTaskLoss(nn.Module):
         return total_loss, loss_cls, loss_sev
 
 
+class MultiTaskSoftLabelLoss(nn.Module):
+    """Multi-task loss with soft labels: classification + severity regression.
+
+    Main task: binary classification with soft labels based on severity
+    Auxiliary task: severity regression (only computed on positive samples)
+
+    Soft label mapping:
+        0 (negative): 0.0
+        1 (mild): 0.6
+        2 (moderate): 0.8
+        3 (severe): 1.0
+    """
+
+    SEVERITY_TO_SOFT_LABEL = {
+        0: 0.0,
+        1: 0.6,
+        2: 0.8,
+        3: 1.0,
+    }
+
+    def __init__(self, lambda_sev: float = 0.5):
+        super().__init__()
+        self.lambda_sev = lambda_sev
+        self.cls_loss_fn = nn.BCEWithLogitsLoss()
+        self.sev_loss_fn = nn.MSELoss()
+
+    def forward(
+        self,
+        logits_cls: Tensor,
+        logits_sev: Tensor,
+        targets_cls: Tensor,
+        targets_sev: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        logits_cls = logits_cls.squeeze(-1)
+        logits_sev = logits_sev.squeeze(-1)
+
+        soft_targets = torch.zeros_like(logits_cls)
+        for i in range(len(targets_sev)):
+            sev = int(targets_sev[i].item())
+            soft_targets[i] = self.SEVERITY_TO_SOFT_LABEL.get(sev, 1.0)
+
+        loss_cls = self.cls_loss_fn(logits_cls, soft_targets)
+
+        pos_mask = targets_cls == 1
+        if pos_mask.sum() > 0:
+            pos_logits_sev = logits_sev[pos_mask]
+            pos_targets_sev = targets_sev[pos_mask].float()
+            loss_sev = self.sev_loss_fn(pos_logits_sev, pos_targets_sev)
+        else:
+            loss_sev = torch.tensor(0.0, device=logits_cls.device)
+
+        total_loss = loss_cls + self.lambda_sev * loss_sev
+        return total_loss, loss_cls, loss_sev
+
+
 class TemperatureDataset(Dataset):
     """Dataset with face-masked temperature matrices."""
 
@@ -384,9 +441,11 @@ class SimpleCNN(nn.Module):
         in_channels: int = 1,
         img_size: int = 64,
         multi_task: bool = False,
+        soft_label: bool = False,
     ):
         super().__init__()
         self.multi_task = multi_task
+        self.soft_label = soft_label
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
@@ -405,7 +464,8 @@ class SimpleCNN(nn.Module):
             dummy = self.pool(F.relu(self.bn3(self.conv3(dummy))))
             self.flat_size = dummy.numel()
         self.fc1 = nn.Linear(self.flat_size, 256)
-        self.classifier_head = nn.Linear(256, num_classes)
+        cls_out = 1 if self.soft_label else num_classes
+        self.classifier_head = nn.Linear(256, cls_out)
         if self.multi_task:
             self.severity_head = nn.Linear(256, 1)
 
@@ -432,9 +492,11 @@ class DeeperCNN(nn.Module):
         in_channels: int = 1,
         img_size: int = 64,
         multi_task: bool = False,
+        soft_label: bool = False,
     ):
         super().__init__()
         self.multi_task = multi_task
+        self.soft_label = soft_label
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
             nn.BatchNorm2d(32),
@@ -475,11 +537,12 @@ class DeeperCNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
         )
+        cls_out = 1 if self.soft_label else num_classes
         self.classifier_head = nn.Sequential(
             nn.Linear(256, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(64, num_classes),
+            nn.Linear(64, cls_out),
         )
         if self.multi_task:
             self.severity_head = nn.Linear(256, 1)
@@ -619,6 +682,7 @@ def evaluate(
     loader: DataLoader,
     device: torch.device,
     multi_task: bool = False,
+    soft_label: bool = False,
 ) -> tuple[dict, list[str]]:
     model.eval()
     all_preds = []
@@ -632,8 +696,13 @@ def evaluate(
             logits_cls, _ = model(x)
         else:
             logits_cls = model(x)
-        probs = F.softmax(logits_cls, dim=1)[:, 1].cpu().numpy()
-        preds = logits_cls.argmax(dim=1).cpu().numpy()
+
+        if soft_label:
+            probs = torch.sigmoid(logits_cls.squeeze(-1)).cpu().numpy()
+            preds = (probs > 0.5).astype(int)
+        else:
+            probs = F.softmax(logits_cls, dim=1)[:, 1].cpu().numpy()
+            preds = logits_cls.argmax(dim=1).cpu().numpy()
 
         all_preds.extend(preds)
         all_probs.extend(probs)
@@ -669,6 +738,7 @@ def main():
     parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
     parser.add_argument("--region-attention", action="store_true", help="Use region attention map as second input channel")
     parser.add_argument("--multi-task", action="store_true", help="Enable multi-task learning (classification + severity regression)")
+    parser.add_argument("--soft-label", action="store_true", help="Use soft labels for classification (requires --multi-task)")
     parser.add_argument("--lambda-sev", type=float, default=0.3, help="Severity loss weight for multi-task learning")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
@@ -683,6 +753,7 @@ def main():
     print(f"Use augmentation: {args.augment}")
     print(f"Use region attention: {args.region_attention}")
     print(f"Use multi-task learning: {args.multi_task}")
+    print(f"Use soft labels: {args.soft_label}")
 
     repo_root = Path(".").resolve()
 
@@ -718,13 +789,17 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
     in_channels = 2 if args.region_attention else 1
+    soft_label = args.soft_label
+    multi_task = args.multi_task or args.soft_label
+
     if args.model == "simple":
         model = SimpleCNN(
             num_classes=2,
             dropout=args.dropout,
             in_channels=in_channels,
             img_size=args.target_size,
-            multi_task=args.multi_task,
+            multi_task=multi_task,
+            soft_label=soft_label,
         )
     else:
         model = DeeperCNN(
@@ -732,13 +807,16 @@ def main():
             dropout=args.dropout,
             in_channels=in_channels,
             img_size=args.target_size,
-            multi_task=args.multi_task,
+            multi_task=multi_task,
+            soft_label=soft_label,
         )
     model = model.to(device)
 
     class_weights = compute_class_weights(train_dataset, device)
 
-    if args.multi_task:
+    if soft_label:
+        criterion = MultiTaskSoftLabelLoss(lambda_sev=args.lambda_sev)
+    elif multi_task:
         criterion = MultiTaskLoss(class_weights, lambda_sev=args.lambda_sev)
     elif args.no_severity:
         criterion = SeverityWeightedLoss(class_weights, {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0})
@@ -754,8 +832,8 @@ def main():
 
     print(f"\nTraining for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, multi_task=args.multi_task)
-        val_metrics, _ = evaluate(model, val_loader, device, multi_task=args.multi_task)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, multi_task=multi_task)
+        val_metrics, _ = evaluate(model, val_loader, device, multi_task=multi_task, soft_label=soft_label)
         scheduler.step()
 
         history.append({
@@ -783,7 +861,7 @@ def main():
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    test_metrics, _ = evaluate(model, test_loader, device, multi_task=args.multi_task)
+    test_metrics, _ = evaluate(model, test_loader, device, multi_task=multi_task, soft_label=soft_label)
 
     print(f"\n{'='*50}")
     print("Test Results")
@@ -800,8 +878,9 @@ def main():
         "use_severity_weighting": not args.no_severity,
         "use_augmentation": args.augment,
         "use_region_attention": args.region_attention,
-        "use_multi_task": args.multi_task,
-        "lambda_sev": args.lambda_sev if args.multi_task else None,
+        "use_multi_task": multi_task,
+        "use_soft_label": soft_label,
+        "lambda_sev": args.lambda_sev if multi_task else None,
         "target_size": args.target_size,
         "dropout": args.dropout,
         "lr": args.lr,
