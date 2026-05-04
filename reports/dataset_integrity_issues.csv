@@ -1,0 +1,286 @@
+year,patient_id,code,message,path
+2024,003CJ,missing_sequence_1_image,No first/front image was found.,datasets/2024/003CJ
+2024,092AA,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/092AA/092AA1.jpg
+2024,160CF,missing_sequence_1_image,No first/front image was found.,datasets/2024/160CF
+2024,20240501_20240501100854902,missing_sequence_1_image,No first/front image was found.,datasets/2024/20240501_20240501100854902
+2024,20240502_20240502084805722,missing_sequence_1_image,No first/front image was found.,datasets/2024/20240502_20240502084805722
+2024,20240502_20240502092622180,missing_sequence_1_image,No first/front image was found.,datasets/2024/20240502_20240502092622180
+2024,20240502XIAWU_20240502141434592,missing_sequence_1_image,No first/front image was found.,datasets/2024/20240502xiawu_20240502141434592
+2024,20240502XIAWU_20240502164416467,missing_sequence_1_image,No first/front image was found.,datasets/2024/20240502xiawu_20240502164416467
+2024,AM002,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/AM002/AM0021.jpg
+2024,BI017,missing_sequence_1_image,No first/front image was found.,datasets/2024/BI017
+2024,CA066,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/CA066/CA0661.jpg
+2024,CF023,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/CF023/CF0231.jpg
+2024,CH079,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/CH079/CH0791.jpg
+2024,GP002,missing_temperature_csv,Sequence 1 image has no matching CSV.,datasets/2024/GP002/GP0021.jpg
+2024,XINZENG,missing_sequence_1_image,No first/front image was found.,datasets/2024/XINZENG
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/192.168.1.101_20250718151039942.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6362403辛秉太-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6667609雷传坤-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6670101高兴元-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6803240孙红-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/6878124景丙合-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8185756张桂平-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8232517孔繁舜-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8235083张修华-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8240576宋文林-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249423杨齐胜-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8249671孙贵凤-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251229袁进涛-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251361谢广亮-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8251646包有江-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252224 崔炳琦-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252701王守平-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252799王忠永-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8252876 张友平-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253150李忠成-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253290丁巧莲-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253599张见美-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253667位静-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8253973杨学轩-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8254964魏义珍-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8255988杨娜-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8257914安令兰-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259656李胡氏-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8259809石川-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260019杨秀清-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8260943张振和-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-仰1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-仰2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-右1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-右2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-左1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-左2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-正1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/8261002王清岭-正2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/CN026-正 -1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/CN026-正 -2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/FY001正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+2柳志彬-正-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-仰-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-仰-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-右-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-右-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-左-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-左-2.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-正-1.jpg
+2025,,unparseable_image_name,Cannot parse patient id/view/sequence from image name.,datasets/2025/热成像照片/孔村+3朱士苓-正-2.jpg
+2025,CN026,missing_front_image,No front image was found for this patient.,
+2025,FY001,missing_front_sequence_1,"Front images exist, but no sequence 1 front image was found.",datasets/2025/热成像照片/FY001-正-2.jpg
+2025,,orphan_temperature_csv,Temperature CSV has no matching image file.,datasets/2025/热成像温度数据/AU004-正-2(1).csv

@@ -57,6 +57,7 @@ venv/
 datasets/
 data/raw/
 data/processed/
+processed/
 
 # Results directories
 *_results/
