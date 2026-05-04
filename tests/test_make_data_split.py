@@ -18,7 +18,6 @@ from scripts.make_data_split import (
 from scripts.compare_models import (
     apply_split,
     binary_metrics,
-    multiclass_metrics,
 )
 
 
@@ -178,7 +177,7 @@ class ApplySplitTests(unittest.TestCase):
             "val_patient_ids": ["P003"],
             "test_patient_ids": ["P004"],
         }
-        X_tr, y_tr, X_va, y_va, X_te, y_te = apply_split(df, split, "label")
+        X_tr, y_tr, sev_tr, X_va, y_va, X_te, y_te = apply_split(df, split)
         self.assertEqual(len(X_tr), 2)
         self.assertEqual(len(X_va), 1)
         self.assertEqual(len(X_te), 1)
@@ -191,12 +190,6 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(m["val_acc"], 1.0)
         self.assertEqual(m["val_f1"], 1.0)
         self.assertAlmostEqual(m["val_auc_roc"], 1.0)
-
-    def test_multiclass_metrics_perfect_prediction(self):
-        y = np.array([0, 1, 2, 3])
-        m = multiclass_metrics(y, y, None, prefix="test", classes=[0, 1, 2, 3])
-        self.assertEqual(m["test_acc"], 1.0)
-        self.assertEqual(m["test_macro_f1"], 1.0)
 
 
 if __name__ == "__main__":

@@ -18,11 +18,23 @@ Two training strategies are compared for every model:
 
 Models that do not support sample_weight (KNN) are only run with `standard`.
 
+Feature selection
+-----------------
+Each pipeline includes a SelectPercentile(f_classif) step between the scaler
+and the classifier.  The percentile threshold is tuned by GridSearchCV strictly
+inside the training fold, preventing any information from val/test leaking into
+the feature-selection step.
+
+Model selection
+---------------
+The winning model for each strategy is chosen by `cv_auc_roc` — the
+cross-validated ROC-AUC on the **training set** produced by GridSearchCV.
+Val and test sets are evaluated for reporting only and are never used
+for selection decisions.
+
 Split
 -----
 Loaded from configs/data_split.json (patient-level, pre-stratified).
-GridSearchCV tunes hyperparameters on the training fold; the best estimator is
-scored on val (model selection) and test (final unbiased evaluation).
 
 Output
 ------
@@ -45,6 +57,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.feature_selection import SelectPercentile, f_classif
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -61,8 +74,18 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-import xgboost as xgb
-import lightgbm as lgb
+
+try:
+    import xgboost as xgb
+    _HAS_XGB = True
+except Exception:
+    _HAS_XGB = False
+
+try:
+    import lightgbm as lgb
+    _HAS_LGB = True
+except Exception:
+    _HAS_LGB = False
 
 warnings.filterwarnings("ignore")
 
@@ -73,13 +96,28 @@ FEATURE_META_COLS = {"sample_id", "patient_id", "year", "status"}
 SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0}
 
 
+# Default percentile for SelectPercentile when grid search is disabled.
+_DEFAULT_PERCENTILE = 50
+
+# Percentile values explored during grid search (% of top-scoring features to keep).
+_PERCENTILE_GRID = [30, 50, 70]
+
+
 # ── Pipeline factory ───────────────────────────────────────────────────────────
 
 def _pipe(estimator) -> Pipeline:
+    """Build a pipeline: impute → scale → select features → classify.
+
+    SelectPercentile(f_classif) filters features by ANOVA F-value, keeping only
+    the top `percentile` percent.  It is placed inside the pipeline so that
+    feature selection is re-fitted on each training fold and never sees val/test
+    data.
+    """
     return Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler",  StandardScaler()),
-        ("clf",     estimator),
+        ("imputer",  SimpleImputer(strategy="median")),
+        ("scaler",   StandardScaler()),
+        ("selector", SelectPercentile(f_classif, percentile=_DEFAULT_PERCENTILE)),
+        ("clf",      estimator),
     ])
 
 
@@ -87,20 +125,26 @@ def model_configs() -> list[dict]:
     """Return list of model descriptors for binary classification.
 
     Each entry has:
-      name                  – display name
-      pipeline              – sklearn Pipeline (standard variant with class_weight)
-      pipeline_sw           – sklearn Pipeline for severity_weighted (no class_weight,
-                              sample_weight will be passed at fit time)
-      param_grid            – hyperparameter grid for GridSearchCV
+      name                   – display name
+      pipeline               – sklearn Pipeline (standard variant with class_weight)
+      pipeline_sw            – sklearn Pipeline for severity_weighted (no class_weight,
+                               sample_weight will be passed at fit time)
+      param_grid             – hyperparameter grid for GridSearchCV; always includes
+                               selector__percentile so feature selection is jointly tuned
       supports_sample_weight – whether clf.fit() accepts sample_weight
     """
-    return [
+    pg = _PERCENTILE_GRID  # shorthand
+
+    configs = [
         {
             "name": "LogisticRegression",
             "pipeline":    _pipe(LogisticRegression(max_iter=2000, random_state=42,
                                                     class_weight="balanced")),
             "pipeline_sw": _pipe(LogisticRegression(max_iter=2000, random_state=42)),
-            "param_grid": {"clf__C": [0.01, 0.1, 1, 10]},
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__C": [0.01, 0.1, 1, 10],
+            },
             "supports_sample_weight": True,
         },
         {
@@ -108,14 +152,21 @@ def model_configs() -> list[dict]:
             "pipeline":    _pipe(SVC(kernel="rbf", random_state=42,
                                      class_weight="balanced", probability=True)),
             "pipeline_sw": _pipe(SVC(kernel="rbf", random_state=42, probability=True)),
-            "param_grid": {"clf__C": [0.1, 1, 10], "clf__gamma": ["scale", "auto"]},
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__C": [0.1, 1, 10],
+                "clf__gamma": ["scale", "auto"],
+            },
             "supports_sample_weight": True,
         },
         {
             "name": "KNN",
             "pipeline":    _pipe(KNeighborsClassifier()),
             "pipeline_sw": None,   # KNN has no sample_weight
-            "param_grid": {"clf__n_neighbors": [3, 5, 9, 15]},
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__n_neighbors": [3, 5, 9, 15],
+            },
             "supports_sample_weight": False,
         },
         {
@@ -124,6 +175,7 @@ def model_configs() -> list[dict]:
                                                          class_weight="balanced_subsample")),
             "pipeline_sw": _pipe(RandomForestClassifier(random_state=42)),
             "param_grid": {
+                "selector__percentile": pg,
                 "clf__n_estimators": [100, 300],
                 "clf__max_depth": [None, 5, 10],
             },
@@ -134,38 +186,47 @@ def model_configs() -> list[dict]:
             "pipeline":    _pipe(GradientBoostingClassifier(random_state=42)),
             "pipeline_sw": _pipe(GradientBoostingClassifier(random_state=42)),
             "param_grid": {
+                "selector__percentile": pg,
                 "clf__n_estimators": [100, 200],
                 "clf__learning_rate": [0.05, 0.1],
                 "clf__max_depth": [3, 5],
             },
             "supports_sample_weight": True,
         },
-        {
+    ]
+
+    if _HAS_XGB:
+        configs.append({
             "name": "XGBoost",
             "pipeline":    _pipe(xgb.XGBClassifier(random_state=42, eval_metric="logloss",
                                                     use_label_encoder=False, verbosity=0)),
             "pipeline_sw": _pipe(xgb.XGBClassifier(random_state=42, eval_metric="logloss",
                                                     use_label_encoder=False, verbosity=0)),
             "param_grid": {
+                "selector__percentile": pg,
                 "clf__n_estimators": [100, 300],
                 "clf__learning_rate": [0.05, 0.1],
                 "clf__max_depth": [3, 6],
             },
             "supports_sample_weight": True,
-        },
-        {
+        })
+
+    if _HAS_LGB:
+        configs.append({
             "name": "LightGBM",
             "pipeline":    _pipe(lgb.LGBMClassifier(random_state=42, verbosity=-1,
                                                      class_weight="balanced")),
             "pipeline_sw": _pipe(lgb.LGBMClassifier(random_state=42, verbosity=-1)),
             "param_grid": {
+                "selector__percentile": pg,
                 "clf__n_estimators": [100, 300],
                 "clf__learning_rate": [0.05, 0.1],
                 "clf__num_leaves": [31, 63],
             },
             "supports_sample_weight": True,
-        },
-    ]
+        })
+
+    return configs
 
 
 # ── Data loading ───────────────────────────────────────────────────────────────
@@ -277,7 +338,13 @@ def score_split(pipeline, X, y, prefix: str) -> dict:
 def _fit(pipe: Pipeline, X_tr, y_tr,
          param_grid: dict, do_search: bool, cv_folds: int,
          sample_weight=None) -> tuple:
-    """Fit pipeline, optionally with GridSearchCV. Returns (best_estimator, best_params)."""
+    """Fit pipeline, optionally with GridSearchCV.
+
+    Returns (best_estimator, best_params, cv_auc_roc).
+    `cv_auc_roc` is GridSearchCV's best_score_ (mean ROC-AUC across CV folds on
+    the training set).  It is used for model selection so that val/test sets are
+    never touched during selection.  Returns nan when do_search=False.
+    """
     fit_kwargs = {}
     if sample_weight is not None:
         fit_kwargs["clf__sample_weight"] = sample_weight
@@ -287,10 +354,10 @@ def _fit(pipe: Pipeline, X_tr, y_tr,
         gs = GridSearchCV(pipe, param_grid, scoring="roc_auc",
                           cv=cv, n_jobs=-1, refit=True)
         gs.fit(X_tr, y_tr, **fit_kwargs)
-        return gs.best_estimator_, gs.best_params_
+        return gs.best_estimator_, gs.best_params_, float(gs.best_score_)
     else:
         pipe.fit(X_tr, y_tr, **fit_kwargs)
-        return pipe, {}
+        return pipe, {}, float("nan")
 
 
 def run_one_model_strategy(
@@ -302,7 +369,11 @@ def run_one_model_strategy(
     do_search: bool,
     cv_folds: int,
 ) -> dict:
-    """Train and evaluate one (model, strategy) combination."""
+    """Train and evaluate one (model, strategy) combination.
+
+    Model selection uses `cv_auc_roc` (training-set cross-validation score).
+    Val and test scores are recorded for reporting only.
+    """
     if strategy == "standard":
         pipe = cfg["pipeline"]
         sw = None
@@ -310,13 +381,14 @@ def run_one_model_strategy(
         pipe = cfg["pipeline_sw"]
         sw = compute_severity_weights(y_tr, sev_tr)
 
-    best, best_params = _fit(pipe, X_tr, y_tr, cfg["param_grid"],
-                             do_search, cv_folds, sample_weight=sw)
+    best, best_params, cv_auc = _fit(pipe, X_tr, y_tr, cfg["param_grid"],
+                                     do_search, cv_folds, sample_weight=sw)
 
     row = {
         "model": cfg["name"],
         "strategy": strategy,
         "best_params": json.dumps(best_params, ensure_ascii=False),
+        "cv_auc_roc": cv_auc,   # training-CV score → used for model selection
     }
     row.update(score_split(best, X_va, y_va, prefix="val"))
     row.update(score_split(best, X_te, y_te, prefix="test"))
@@ -364,7 +436,8 @@ def run_comparison(data: dict, do_search: bool, cv_folds: int) -> list[dict]:
                     do_search, cv_folds,
                 )
                 rows.append(row)
-                print(f"val_auc={row['val_auc_roc']:.3f}  test_auc={row['test_auc_roc']:.3f}")
+                cv_str = f"{row['cv_auc_roc']:.3f}" if pd.notna(row["cv_auc_roc"]) else " n/a"
+                print(f"cv_auc={cv_str}  val_auc={row['val_auc_roc']:.3f}  test_auc={row['test_auc_roc']:.3f}")
             except Exception as exc:
                 print(f"FAILED: {exc}")
     return rows
@@ -382,23 +455,29 @@ def save_results(rows: list[dict], output_dir: Path, timestamp: str) -> Path:
 def print_summary(rows: list[dict]) -> None:
     df = pd.DataFrame(rows)
     cols = ["model", "strategy",
+            "cv_auc_roc",
             "val_auc_roc", "val_auc_pr", "val_bal_acc", "val_f1",
             "test_auc_roc", "test_auc_pr", "test_bal_acc", "test_f1"]
     show = df[[c for c in cols if c in df.columns]].copy()
 
-    print(f"\n{'─'*90}")
+    print(f"\n{'─'*100}")
     print("RESULTS — Binary ICAS classification")
-    print(f"{'─'*90}")
+    print(f"  cv_auc_roc : training-set cross-validation AUC (used for model selection)")
+    print(f"  val_auc_roc: held-out validation AUC          (reporting only)")
+    print(f"  test_auc_roc: held-out test AUC               (final unbiased estimate)")
+    print(f"{'─'*100}")
     for c in show.columns[2:]:
         show[c] = show[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "n/a")
     print(show.to_string(index=False))
 
-    print(f"\n{'─'*90}")
-    print("Best model per strategy (by val_auc_roc):")
+    print(f"\n{'─'*100}")
+    print("Best model per strategy (selected by cv_auc_roc — training CV, NOT val):")
     for strat, grp in df.groupby("strategy"):
-        best_idx = grp["val_auc_roc"].idxmax()
+        best_idx = grp["cv_auc_roc"].idxmax()
         best = grp.loc[best_idx]
+        cv_str  = f"{best['cv_auc_roc']:.4f}" if pd.notna(best["cv_auc_roc"]) else "n/a"
         print(f"  {strat:<20}  {best['model']:<22}"
+              f"  cv_auc={cv_str}"
               f"  val_auc={best['val_auc_roc']:.4f}"
               f"  test_auc={best['test_auc_roc']:.4f}")
 
