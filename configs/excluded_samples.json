@@ -1,0 +1,74 @@
+{
+  "description": "Samples excluded from model building due to annotation issues",
+  "created_at": "2026-05-04",
+  "excluded_samples": [
+    {
+      "sample_id": "2024_BX032_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2024_CD019_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2024_CN016_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_068DH_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_068DH_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_BQ044_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_BQ044_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_BR031_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CA113_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CA113_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CA122_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CA122_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CA137_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_CH008_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_FH002_2",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_HH010_1",
+      "reason": "annotation_issue"
+    },
+    {
+      "sample_id": "2025_HH010_2",
+      "reason": "annotation_issue"
+    }
+  ]
+}

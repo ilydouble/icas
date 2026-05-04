@@ -76,4 +76,5 @@ _next
 
 
 *.json
+!configs/*.json
 *.npy
