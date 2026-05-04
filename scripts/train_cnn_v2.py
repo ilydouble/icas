@@ -6,12 +6,14 @@ Key features:
 2. Only uses temperature values within face region
 3. Severity-weighted loss: positive samples weighted by stenosis severity
 4. Optional region attention: dual-channel input (temp + attention map)
+5. Optional multi-task learning: classification + severity regression
 
 Usage:
     python scripts/train_cnn_v2.py
     python scripts/train_cnn_v2.py --epochs 100 --device cuda
     python scripts/train_cnn_v2.py --augment
     python scripts/train_cnn_v2.py --region-attention
+    python scripts/train_cnn_v2.py --multi-task --lambda-sev 0.3
 """
 
 from __future__ import annotations
@@ -241,6 +243,41 @@ class SeverityWeightedLoss(nn.Module):
         return (ce_loss * sample_weights).mean()
 
 
+class MultiTaskLoss(nn.Module):
+    """Multi-task loss: binary classification + severity regression.
+
+    Main task: binary classification (ICAS positive/negative)
+    Auxiliary task: severity regression (only computed on positive samples)
+    """
+
+    def __init__(self, class_weights: Tensor, lambda_sev: float = 0.3):
+        super().__init__()
+        self.register_buffer("class_weights", class_weights)
+        self.lambda_sev = lambda_sev
+        self.cls_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+        self.sev_loss_fn = nn.MSELoss()
+
+    def forward(
+        self,
+        logits_cls: Tensor,
+        logits_sev: Tensor,
+        targets_cls: Tensor,
+        targets_sev: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        loss_cls = self.cls_loss_fn(logits_cls, targets_cls)
+
+        pos_mask = targets_cls == 1
+        if pos_mask.sum() > 0:
+            pos_logits_sev = logits_sev[pos_mask].squeeze(-1)
+            pos_targets_sev = targets_sev[pos_mask].float()
+            loss_sev = self.sev_loss_fn(pos_logits_sev, pos_targets_sev)
+        else:
+            loss_sev = torch.tensor(0.0, device=logits_cls.device)
+
+        total_loss = loss_cls + self.lambda_sev * loss_sev
+        return total_loss, loss_cls, loss_sev
+
+
 class TemperatureDataset(Dataset):
     """Dataset with face-masked temperature matrices."""
 
@@ -340,8 +377,16 @@ class TemperatureDataset(Dataset):
 class SimpleCNN(nn.Module):
     """Simple CNN for temperature matrix classification."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1, img_size: int = 64):
+    def __init__(
+        self,
+        num_classes: int = 2,
+        dropout: float = 0.3,
+        in_channels: int = 1,
+        img_size: int = 64,
+        multi_task: bool = False,
+    ):
         super().__init__()
+        self.multi_task = multi_task
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
@@ -360,23 +405,36 @@ class SimpleCNN(nn.Module):
             dummy = self.pool(F.relu(self.bn3(self.conv3(dummy))))
             self.flat_size = dummy.numel()
         self.fc1 = nn.Linear(self.flat_size, 256)
-        self.fc2 = nn.Linear(256, num_classes)
+        self.classifier_head = nn.Linear(256, num_classes)
+        if self.multi_task:
+            self.severity_head = nn.Linear(256, 1)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor | tuple[Tensor, Tensor]:
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
         x = self.pool(F.relu(self.bn3(self.conv3(x))))
         x = x.view(x.size(0), -1)
-        x = self.dropout(F.relu(self.fc1(x)))
-        x = self.fc2(x)
-        return x
+        features = self.dropout(F.relu(self.fc1(x)))
+        logits_cls = self.classifier_head(features)
+        if self.multi_task:
+            logits_sev = self.severity_head(features)
+            return logits_cls, logits_sev
+        return logits_cls
 
 
 class DeeperCNN(nn.Module):
     """Deeper CNN with more capacity."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1, img_size: int = 64):
+    def __init__(
+        self,
+        num_classes: int = 2,
+        dropout: float = 0.3,
+        in_channels: int = 1,
+        img_size: int = 64,
+        multi_task: bool = False,
+    ):
         super().__init__()
+        self.multi_task = multi_task
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
             nn.BatchNorm2d(32),
@@ -412,21 +470,29 @@ class DeeperCNN(nn.Module):
             dummy = torch.zeros(1, in_channels, img_size, img_size)
             dummy = self.features(dummy)
             self.flat_size = dummy.numel()
-        self.classifier = nn.Sequential(
+        self.shared = nn.Sequential(
             nn.Linear(self.flat_size, 256),
             nn.ReLU(),
             nn.Dropout(dropout),
+        )
+        self.classifier_head = nn.Sequential(
             nn.Linear(256, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(64, num_classes),
         )
+        if self.multi_task:
+            self.severity_head = nn.Linear(256, 1)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor | tuple[Tensor, Tensor]:
         x = self.features(x)
         x = x.view(x.size(0), -1)
-        x = self.classifier(x)
-        return x
+        features = self.shared(x)
+        logits_cls = self.classifier_head(features)
+        if self.multi_task:
+            logits_sev = self.severity_head(features)
+            return logits_cls, logits_sev
+        return logits_cls
 
 
 def load_excluded_ids(path: Path | None) -> set[str]:
@@ -525,17 +591,22 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) 
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
-    criterion: SeverityWeightedLoss,
+    criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    multi_task: bool = False,
 ) -> float:
     model.train()
     total_loss = 0.0
     for x, y, sev, _ in loader:
         x, y, sev = x.to(device), y.to(device), sev.to(device)
         optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y, sev)
+        if multi_task:
+            logits_cls, logits_sev = model(x)
+            loss, _, _ = criterion(logits_cls, logits_sev, y, sev)
+        else:
+            logits = model(x)
+            loss = criterion(logits, y, sev)
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * x.size(0)
@@ -547,6 +618,7 @@ def evaluate(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
+    multi_task: bool = False,
 ) -> tuple[dict, list[str]]:
     model.eval()
     all_preds = []
@@ -556,9 +628,12 @@ def evaluate(
 
     for x, y, _, sample_ids in loader:
         x = x.to(device)
-        logits = model(x)
-        probs = F.softmax(logits, dim=1)[:, 1].cpu().numpy()
-        preds = logits.argmax(dim=1).cpu().numpy()
+        if multi_task:
+            logits_cls, _ = model(x)
+        else:
+            logits_cls = model(x)
+        probs = F.softmax(logits_cls, dim=1)[:, 1].cpu().numpy()
+        preds = logits_cls.argmax(dim=1).cpu().numpy()
 
         all_preds.extend(preds)
         all_probs.extend(probs)
@@ -582,7 +657,7 @@ def main():
     parser.add_argument("--annotations", type=Path, default=Path("outputs/annotations/annotations.json"))
     parser.add_argument("--masks-dir", type=Path, default=Path("outputs/annotations/masks"))
     parser.add_argument("--output", type=Path, default=Path("reports"))
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -593,6 +668,8 @@ def main():
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
     parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
     parser.add_argument("--region-attention", action="store_true", help="Use region attention map as second input channel")
+    parser.add_argument("--multi-task", action="store_true", help="Enable multi-task learning (classification + severity regression)")
+    parser.add_argument("--lambda-sev", type=float, default=0.3, help="Severity loss weight for multi-task learning")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -605,6 +682,7 @@ def main():
     print(f"Use severity weighting: {not args.no_severity}")
     print(f"Use augmentation: {args.augment}")
     print(f"Use region attention: {args.region_attention}")
+    print(f"Use multi-task learning: {args.multi_task}")
 
     repo_root = Path(".").resolve()
 
@@ -641,14 +719,28 @@ def main():
 
     in_channels = 2 if args.region_attention else 1
     if args.model == "simple":
-        model = SimpleCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels, img_size=args.target_size)
+        model = SimpleCNN(
+            num_classes=2,
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=args.multi_task,
+        )
     else:
-        model = DeeperCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels, img_size=args.target_size)
+        model = DeeperCNN(
+            num_classes=2,
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=args.multi_task,
+        )
     model = model.to(device)
 
     class_weights = compute_class_weights(train_dataset, device)
 
-    if args.no_severity:
+    if args.multi_task:
+        criterion = MultiTaskLoss(class_weights, lambda_sev=args.lambda_sev)
+    elif args.no_severity:
         criterion = SeverityWeightedLoss(class_weights, {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0})
     else:
         criterion = SeverityWeightedLoss(class_weights, SEVERITY_MULTIPLIER)
@@ -662,8 +754,8 @@ def main():
 
     print(f"\nTraining for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-        val_metrics, _ = evaluate(model, val_loader, device)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, multi_task=args.multi_task)
+        val_metrics, _ = evaluate(model, val_loader, device, multi_task=args.multi_task)
         scheduler.step()
 
         history.append({
@@ -691,7 +783,7 @@ def main():
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    test_metrics, _ = evaluate(model, test_loader, device)
+    test_metrics, _ = evaluate(model, test_loader, device, multi_task=args.multi_task)
 
     print(f"\n{'='*50}")
     print("Test Results")
@@ -708,6 +800,8 @@ def main():
         "use_severity_weighting": not args.no_severity,
         "use_augmentation": args.augment,
         "use_region_attention": args.region_attention,
+        "use_multi_task": args.multi_task,
+        "lambda_sev": args.lambda_sev if args.multi_task else None,
         "target_size": args.target_size,
         "dropout": args.dropout,
         "lr": args.lr,
