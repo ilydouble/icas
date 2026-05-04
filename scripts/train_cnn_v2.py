@@ -587,7 +587,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--target-size", type=int, default=128)
+    parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--model", type=str, default="simple", choices=["simple", "deeper"])
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
