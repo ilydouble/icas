@@ -75,33 +75,26 @@ def load_face_mask(mask_path: Path, target_size: tuple[int, int]) -> np.ndarray:
     return (mask > 127).astype(np.float32)
 
 
+TEMP_RANGE_MIN = 20.0
+TEMP_RANGE_MAX = 45.0
+
+
 def apply_face_mask(
     temp_matrix: np.ndarray,
     mask: np.ndarray,
     fill_value: float = 0.0,
-    normalize: bool = True,
 ) -> np.ndarray:
-    """Apply face mask to temperature matrix.
+    """Apply face mask to temperature matrix with fixed-range normalization.
 
-    Args:
-        temp_matrix: Temperature matrix (H, W)
-        mask: Face mask (H, W), 1 for face, 0 for background
-        fill_value: Value to fill for non-face regions
-        normalize: Whether to normalize to [0, 1] within face region
+    Temperature is normalized to [0, 1] using physiological range [20, 45] °C.
+    Values outside this range are clipped. Non-face regions are set to fill_value.
     """
     target_h, target_w = mask.shape
     temp_resized = cv2.resize(temp_matrix, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
 
-    if normalize:
-        face_vals = temp_resized[mask > 0]
-        if face_vals.size > 0:
-            min_val, max_val = face_vals.min(), face_vals.max()
-            if max_val - min_val > 1e-6:
-                temp_resized = (temp_resized - min_val) / (max_val - min_val)
-            else:
-                temp_resized = np.zeros_like(temp_resized)
+    temp_norm = np.clip((temp_resized - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0)
 
-    masked_temp = temp_resized * mask + fill_value * (1 - mask)
+    masked_temp = temp_norm * mask + fill_value * (1 - mask)
     return masked_temp.astype(np.float32)
 
 
@@ -195,11 +188,9 @@ class TemperatureDataset(Dataset):
             masked_temp = apply_face_mask(temp_matrix, mask, fill_value=0.0, normalize=True)
         else:
             temp_resized = cv2.resize(temp_matrix, (self.target_size[1], self.target_size[0]))
-            min_val, max_val = temp_resized.min(), temp_resized.max()
-            if max_val - min_val > 1e-6:
-                masked_temp = (temp_resized - min_val) / (max_val - min_val)
-            else:
-                masked_temp = np.zeros(self.target_size, dtype=np.float32)
+            masked_temp = np.clip(
+                (temp_resized - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0
+            ).astype(np.float32)
 
         x = torch.from_numpy(masked_temp).unsqueeze(0).float()
         y = torch.tensor(self.labels.get(patient_id, 0), dtype=torch.long)
