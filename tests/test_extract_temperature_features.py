@@ -16,6 +16,7 @@ from scripts.extract_temperature_features import (
     align_polygon_to_temperature,
     asymmetry_features,
     build_polygon_mask,
+    coldspot_features,
     extract_sample_features,
     feature_columns,
     hotspot_features,
@@ -78,6 +79,10 @@ class StatsTests(unittest.TestCase):
         self.assertAlmostEqual(stats["min"], 1.0)
         self.assertAlmostEqual(stats["max"], 5.0)
         self.assertAlmostEqual(stats["range"], 4.0)
+        # IQR: p75 - p25
+        self.assertAlmostEqual(stats["iqr"], stats["p75"] - stats["p25"])
+        # CV: std / mean
+        self.assertAlmostEqual(stats["cv"], stats["std"] / stats["mean"], places=5)
         for name in STAT_NAMES:
             self.assertIn(name, stats)
 
@@ -85,6 +90,8 @@ class StatsTests(unittest.TestCase):
         values = np.array([3.0, 3.0, 3.0], dtype=np.float32)
         stats = region_stats(values)
         self.assertEqual(stats["std"], 0.0)
+        self.assertEqual(stats["iqr"], 0.0)
+        self.assertAlmostEqual(stats["cv"], 0.0)  # std/mean = 0/3 = 0
         self.assertEqual(stats["skew"], 0.0)
         self.assertEqual(stats["kurtosis"], 0.0)
 
@@ -96,14 +103,38 @@ class StatsTests(unittest.TestCase):
 
 class AsymmetryTests(unittest.TestCase):
     def test_asymmetry_features_compute_diff_and_ratio(self):
-        left = {"mean": 35.0, "std": 0.5}
-        right = {"mean": 34.0, "std": 0.4}
+        left = {"mean": 35.0, "std": 0.5, "median": 35.1, "p25": 34.5, "p75": 35.5, "iqr": 1.0}
+        right = {"mean": 34.0, "std": 0.4, "median": 34.0, "p25": 33.5, "p75": 34.5, "iqr": 1.1}
         feats = asymmetry_features(left, right, "eye")
         self.assertAlmostEqual(feats["eye_diff_mean"], 1.0)
         self.assertAlmostEqual(feats["eye_abs_diff_mean"], 1.0)
         self.assertAlmostEqual(feats["eye_ratio_mean"], 35.0 / 34.0)
         self.assertGreater(feats["eye_asymmetry_index"], 0)
         self.assertAlmostEqual(feats["eye_diff_std"], 0.1, places=5)
+        # New robust asymmetry features
+        self.assertAlmostEqual(feats["eye_diff_median"], 1.1, places=5)
+        self.assertAlmostEqual(feats["eye_diff_p25"], 1.0, places=5)
+        self.assertAlmostEqual(feats["eye_diff_p75"], 1.0, places=5)
+        self.assertAlmostEqual(feats["eye_diff_iqr"], -0.1, places=5)
+
+
+class ColdspotTests(unittest.TestCase):
+    def test_coldspot_locates_min_inside_mask(self):
+        temp = np.full((10, 10), 35.0, dtype=np.float32)
+        temp[6, 7] = 20.0  # cold inside bbox
+        temp[1, 1] = 25.0  # slightly warmer, outside mask
+        mask = np.zeros_like(temp, dtype=np.uint8)
+        mask[5:9, 5:9] = 255
+        feats = coldspot_features(temp, mask, [5.0, 5.0, 9.0, 9.0])
+        self.assertAlmostEqual(feats["face_coldspot_x_rel"], (7 - 5) / 4)
+        self.assertAlmostEqual(feats["face_coldspot_y_rel"], (6 - 5) / 4)
+
+    def test_coldspot_returns_nan_for_empty_mask(self):
+        temp = np.zeros((5, 5), dtype=np.float32)
+        mask = np.zeros((5, 5), dtype=np.uint8)
+        feats = coldspot_features(temp, mask, [0.0, 0.0, 5.0, 5.0])
+        self.assertTrue(np.isnan(feats["face_coldspot_x_rel"]))
+        self.assertTrue(np.isnan(feats["face_coldspot_y_rel"]))
 
 
 class HotspotTests(unittest.TestCase):

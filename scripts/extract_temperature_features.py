@@ -42,6 +42,8 @@ REGION_NAMES = [
 STAT_NAMES = [
     "mean", "std", "median", "min", "max", "range",
     "p5", "p25", "p75", "p95",
+    "iqr",       # interquartile range: p75 - p25 (robust spread)
+    "cv",        # coefficient of variation: std / mean (relative variability)
     "skew", "kurtosis",
 ]
 
@@ -141,24 +143,34 @@ def region_stats(values: np.ndarray) -> dict[str, float]:
     """Compute the standard set of statistics for a 1D temperature sample."""
     if values.size == 0:
         return {name: float("nan") for name in STAT_NAMES}
+    mean_val = float(values.mean())
+    std_val = float(values.std())
+    p25_val = float(np.percentile(values, 25))
+    p75_val = float(np.percentile(values, 75))
     return {
-        "mean": float(values.mean()),
-        "std": float(values.std()),
+        "mean": mean_val,
+        "std": std_val,
         "median": float(np.median(values)),
         "min": float(values.min()),
         "max": float(values.max()),
         "range": float(values.max() - values.min()),
         "p5": float(np.percentile(values, 5)),
-        "p25": float(np.percentile(values, 25)),
-        "p75": float(np.percentile(values, 75)),
+        "p25": p25_val,
+        "p75": p75_val,
         "p95": float(np.percentile(values, 95)),
+        "iqr": p75_val - p25_val,
+        "cv": (std_val / mean_val) if abs(mean_val) > 1e-9 else float("nan"),
         "skew": _safe_skew(values),
         "kurtosis": _safe_kurtosis(values),
     }
 
 
 def asymmetry_features(left: dict[str, float], right: dict[str, float], prefix: str) -> dict[str, float]:
-    """Bilateral asymmetry features for paired regions (e.g. left/right eye)."""
+    """Bilateral asymmetry features for paired regions (e.g. left/right eye).
+
+    Computes differences for mean, median, p25, p75 and IQR so that both the
+    central tendency and spread asymmetry are captured robustly.
+    """
     lm = left.get("mean", float("nan"))
     rm = right.get("mean", float("nan"))
     diff = lm - rm
@@ -166,7 +178,6 @@ def asymmetry_features(left: dict[str, float], right: dict[str, float], prefix: 
     denom = (abs(lm) + abs(rm)) / 2.0
     ratio = (lm / rm) if rm not in (0.0, float("nan")) and not np.isnan(rm) else float("nan")
     asym = (abs_diff / denom) if denom > 1e-9 else float("nan")
-    # std difference captures distribution-shape asymmetry
     ls = left.get("std", float("nan"))
     rs = right.get("std", float("nan"))
     return {
@@ -175,6 +186,11 @@ def asymmetry_features(left: dict[str, float], right: dict[str, float], prefix: 
         f"{prefix}_ratio_mean": ratio,
         f"{prefix}_asymmetry_index": asym,
         f"{prefix}_diff_std": ls - rs,
+        # Robust central-tendency and spread asymmetry
+        f"{prefix}_diff_median": left.get("median", float("nan")) - right.get("median", float("nan")),
+        f"{prefix}_diff_p25": left.get("p25", float("nan")) - right.get("p25", float("nan")),
+        f"{prefix}_diff_p75": left.get("p75", float("nan")) - right.get("p75", float("nan")),
+        f"{prefix}_diff_iqr": left.get("iqr", float("nan")) - right.get("iqr", float("nan")),
     }
 
 
@@ -213,6 +229,32 @@ def hotspot_features(temp: np.ndarray, mask: np.ndarray, bbox: list[float]) -> d
         "face_hotspot_y_rel": float(hy_rel),
         "face_thermal_gradient_mean": float(grad_in.mean()) if grad_in.size else float("nan"),
         "face_thermal_gradient_std": float(grad_in.std()) if grad_in.size else float("nan"),
+    }
+
+
+def coldspot_features(temp: np.ndarray, mask: np.ndarray, bbox: list[float]) -> dict[str, float]:
+    """Relative location of the coldest pixel inside the face mask.
+
+    Complements `hotspot_features`; a cold spot displaced from the centre
+    may reflect localised reduced perfusion.
+    """
+    _, w = temp.shape
+    if mask.sum() == 0 or temp.size == 0:
+        return {
+            "face_coldspot_x_rel": float("nan"),
+            "face_coldspot_y_rel": float("nan"),
+        }
+
+    masked = np.where(mask > 0, temp, np.inf)
+    cold_idx = int(np.argmin(masked))
+    cy, cx = divmod(cold_idx, w)
+
+    x1, y1, x2, y2 = bbox
+    bw = max(x2 - x1, 1.0)
+    bh = max(y2 - y1, 1.0)
+    return {
+        "face_coldspot_x_rel": float((cx - x1) / bw),
+        "face_coldspot_y_rel": float((cy - y1) / bh),
     }
 
 
@@ -285,10 +327,17 @@ def extract_sample_features(sample: dict, repo_root: Path) -> SampleResult:
     features.update(asymmetry_features(region_stat_map["left_eye"], region_stat_map["right_eye"], "eye"))
     features.update(asymmetry_features(region_stat_map["left_cheek"], region_stat_map["right_cheek"], "cheek"))
 
-    # --- Region-vs-face contrasts ---
+    # --- Region-vs-face contrasts (absolute and z-score) ---
     face_mean = face_stats["mean"]
+    face_std = face_stats["std"]
     for name in REGION_NAMES:
-        features[f"{name}_minus_face_mean"] = region_stat_map[name]["mean"] - face_mean
+        r_mean = region_stat_map[name]["mean"]
+        features[f"{name}_minus_face_mean"] = r_mean - face_mean
+        # Z-score: how many face-std-devs is this region above/below face mean?
+        # Removes between-subject absolute temperature variation.
+        features[f"{name}_zscore_mean"] = (
+            (r_mean - face_mean) / face_std if face_std > 1e-9 else float("nan")
+        )
 
     # --- Inter-region contrasts (clinically meaningful pairs) ---
     nose_m = region_stat_map["nose"]["mean"]
@@ -299,17 +348,21 @@ def extract_sample_features(sample: dict, repo_root: Path) -> SampleResult:
     features["nose_minus_cheeks_mean"] = nose_m - cheeks_m
     features["forehead_minus_eyes_mean"] = forehead_m - eyes_m
     features["eyes_minus_cheeks_mean"] = eyes_m - cheeks_m
+    features["forehead_minus_cheeks_mean"] = forehead_m - cheeks_m
+    features["nose_minus_eyes_mean"] = nose_m - eyes_m
     features["eyes_mean"] = float(eyes_m)
     features["cheeks_mean"] = float(cheeks_m)
 
-    # --- Spatial / hotspot features ---
+    # --- Spatial / hotspot + coldspot features ---
     bbox_temp_x1, bbox_temp_y1 = align_polygon_to_temperature(
         [[face["bbox_xyxy"][0], face["bbox_xyxy"][1]]], image_size, temp_shape
     )[0]
     bbox_temp_x2, bbox_temp_y2 = align_polygon_to_temperature(
         [[face["bbox_xyxy"][2], face["bbox_xyxy"][3]]], image_size, temp_shape
     )[0]
-    features.update(hotspot_features(temp, face_mask, [bbox_temp_x1, bbox_temp_y1, bbox_temp_x2, bbox_temp_y2]))
+    bbox = [bbox_temp_x1, bbox_temp_y1, bbox_temp_x2, bbox_temp_y2]
+    features.update(hotspot_features(temp, face_mask, bbox))
+    features.update(coldspot_features(temp, face_mask, bbox))
 
     return SampleResult(sample_id, patient_id, year, "ok", features)
 
@@ -331,8 +384,10 @@ def load_excluded_ids(path: Path | None) -> set[str]:
 def feature_columns() -> list[str]:
     """Stable column order for the output CSV."""
     cols: list[str] = []
+    # Per-region statistics (includes new iqr, cv)
     for region in ["face"] + REGION_NAMES:
         cols.extend(f"{region}_{s}" for s in STAT_NAMES)
+    # Bilateral asymmetry (includes new diff_median, diff_p25, diff_p75, diff_iqr)
     for prefix in ("eye", "cheek"):
         cols.extend([
             f"{prefix}_diff_mean",
@@ -340,19 +395,33 @@ def feature_columns() -> list[str]:
             f"{prefix}_ratio_mean",
             f"{prefix}_asymmetry_index",
             f"{prefix}_diff_std",
+            f"{prefix}_diff_median",
+            f"{prefix}_diff_p25",
+            f"{prefix}_diff_p75",
+            f"{prefix}_diff_iqr",
         ])
+    # Region-vs-face: absolute difference and z-score
     cols.extend(f"{name}_minus_face_mean" for name in REGION_NAMES)
+    cols.extend(f"{name}_zscore_mean" for name in REGION_NAMES)
+    # Inter-region contrasts
     cols.extend([
         "nose_minus_forehead_mean",
         "nose_minus_cheeks_mean",
         "forehead_minus_eyes_mean",
         "eyes_minus_cheeks_mean",
+        "forehead_minus_cheeks_mean",
+        "nose_minus_eyes_mean",
         "eyes_mean",
         "cheeks_mean",
+    ])
+    # Spatial features: hotspot + coldspot + gradient
+    cols.extend([
         "face_hotspot_x_rel",
         "face_hotspot_y_rel",
         "face_thermal_gradient_mean",
         "face_thermal_gradient_std",
+        "face_coldspot_x_rel",
+        "face_coldspot_y_rel",
     ])
     return cols
 
