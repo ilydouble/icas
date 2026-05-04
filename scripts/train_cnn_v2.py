@@ -5,11 +5,13 @@ Key features:
 1. Uses pre-computed face masks from face_roi_annotation.py
 2. Only uses temperature values within face region
 3. Severity-weighted loss: positive samples weighted by stenosis severity
+4. Optional region attention: dual-channel input (temp + attention map)
 
 Usage:
     python scripts/train_cnn_v2.py
     python scripts/train_cnn_v2.py --epochs 100 --device cuda
     python scripts/train_cnn_v2.py --augment
+    python scripts/train_cnn_v2.py --region-attention
 """
 
 from __future__ import annotations
@@ -77,6 +79,58 @@ def load_face_mask(mask_path: Path) -> np.ndarray:
 
 TEMP_RANGE_MIN = 15.0
 TEMP_RANGE_MAX = 40.0
+
+REGION_ATTENTION_WEIGHTS = {
+    "forehead": 1.0,
+    "left_cheek": 1.0,
+    "right_cheek": 1.0,
+    "left_eye": 0.5,
+    "right_eye": 0.5,
+    "nose": 0.3,
+}
+
+
+def build_region_attention_map(
+    annotation: dict,
+    temp_shape: tuple[int, int],
+    target_size: tuple[int, int],
+    image_size: dict,
+) -> np.ndarray:
+    """Build a spatial attention map from region polygons.
+
+    Each pixel gets the max attention weight across overlapping regions.
+    Face area outside any sub-region gets a base weight of 0.2.
+    Background (outside face) gets 0.0.
+    """
+    temp_h, temp_w = temp_shape
+    attention = np.zeros((temp_h, temp_w), dtype=np.float32)
+
+    face = annotation.get("face")
+    regions = annotation.get("regions") or {}
+
+    if face and face.get("polygon"):
+        face_poly = face["polygon"]
+        sx = temp_w / float(image_size.get("width") or temp_w)
+        sy = temp_h / float(image_size.get("height") or temp_h)
+        face_poly_t = [[x * sx, y * sy] for x, y in face_poly]
+        face_mask = np.zeros((temp_h, temp_w), dtype=np.uint8)
+        cv2.fillPoly(face_mask, [np.array(face_poly_t, dtype=np.int32)], 1)
+        attention[face_mask > 0] = 0.2
+
+    for region_name, weight in REGION_ATTENTION_WEIGHTS.items():
+        region = regions.get(region_name)
+        if not region or not region.get("polygon"):
+            continue
+        poly = region["polygon"]
+        sx = temp_w / float(image_size.get("width") or temp_w)
+        sy = temp_h / float(image_size.get("height") or temp_h)
+        poly_t = [[x * sx, y * sy] for x, y in poly]
+        region_mask = np.zeros((temp_h, temp_w), dtype=np.uint8)
+        cv2.fillPoly(region_mask, [np.array(poly_t, dtype=np.int32)], 1)
+        attention[region_mask > 0] = np.maximum(attention[region_mask > 0], weight)
+
+    attention = cv2.resize(attention, (target_size[1], target_size[0]), interpolation=cv2.INTER_LINEAR)
+    return attention.astype(np.float32)
 
 
 class TemperatureAugmentation:
@@ -201,6 +255,7 @@ class TemperatureDataset(Dataset):
         target_size: tuple[int, int] = (128, 128),
         use_mask: bool = True,
         augment: bool = False,
+        region_attention: bool = False,
     ):
         self.samples = samples
         self.annotations = annotations
@@ -211,12 +266,30 @@ class TemperatureDataset(Dataset):
         self.target_size = target_size
         self.use_mask = use_mask
         self.augment = augment
+        self.region_attention = region_attention
         self.augmentation = TemperatureAugmentation() if augment else None
         self._temp_cache: dict[str, np.ndarray] = {}
         self._mask_cache: dict[str, np.ndarray] = {}
+        self._attention_cache: dict[str, np.ndarray] = {}
 
     def __len__(self) -> int:
         return len(self.samples)
+
+    def _get_attention_map(self, sample_id: str, temp_shape: tuple[int, int]) -> np.ndarray:
+        if sample_id in self._attention_cache:
+            return self._attention_cache[sample_id]
+        annotation = self.annotations.get(sample_id)
+        if not annotation or annotation.get("status") != "ok":
+            attn = np.zeros(self.target_size, dtype=np.float32)
+            self._attention_cache[sample_id] = attn
+            return attn
+        sample = next((s for s in self.samples if s["sample_id"] == sample_id), None)
+        image_size = (sample or {}).get("image_size", {})
+        attn = build_region_attention_map(
+            annotation, temp_shape, self.target_size, image_size
+        )
+        self._attention_cache[sample_id] = attn
+        return attn
 
     def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor, str]:
         sample = self.samples[idx]
@@ -252,7 +325,12 @@ class TemperatureDataset(Dataset):
         if self.augmentation is not None:
             masked_temp = self.augmentation(masked_temp)
 
-        x = torch.from_numpy(masked_temp).unsqueeze(0).float()
+        if self.region_attention:
+            attention_map = self._get_attention_map(sample_id, temp_matrix.shape)
+            x = torch.from_numpy(np.stack([masked_temp, attention_map], axis=0)).float()
+        else:
+            x = torch.from_numpy(masked_temp).unsqueeze(0).float()
+
         y = torch.tensor(self.labels.get(patient_id, 0), dtype=torch.long)
         sev = torch.tensor(self.severities.get(patient_id, 0), dtype=torch.float)
 
@@ -262,9 +340,9 @@ class TemperatureDataset(Dataset):
 class SimpleCNN(nn.Module):
     """Simple CNN for temperature matrix classification."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(64)
@@ -272,11 +350,11 @@ class SimpleCNN(nn.Module):
         self.bn3 = nn.BatchNorm2d(128)
         self.pool = nn.MaxPool2d(2, 2)
         self.dropout = nn.Dropout(dropout)
-        self._init_fc(num_classes)
+        self._init_fc(num_classes, in_channels)
 
-    def _init_fc(self, num_classes: int):
+    def _init_fc(self, num_classes: int, in_channels: int):
         with torch.no_grad():
-            dummy = torch.zeros(1, 1, 128, 128)
+            dummy = torch.zeros(1, in_channels, 128, 128)
             dummy = self.pool(F.relu(self.bn1(self.conv1(dummy))))
             dummy = self.pool(F.relu(self.bn2(self.conv2(dummy))))
             dummy = self.pool(F.relu(self.bn3(self.conv3(dummy))))
@@ -297,10 +375,10 @@ class SimpleCNN(nn.Module):
 class DeeperCNN(nn.Module):
     """Deeper CNN with more capacity."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 32, 3, padding=1),
+            nn.Conv2d(in_channels, 32, 3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Conv2d(32, 32, 3, padding=1),
@@ -327,11 +405,11 @@ class DeeperCNN(nn.Module):
             nn.MaxPool2d(2),
             nn.Dropout2d(0.3),
         )
-        self._init_classifier(num_classes, dropout)
+        self._init_classifier(num_classes, dropout, in_channels)
 
-    def _init_classifier(self, num_classes: int, dropout: float):
+    def _init_classifier(self, num_classes: int, dropout: float, in_channels: int):
         with torch.no_grad():
-            dummy = torch.zeros(1, 1, 128, 128)
+            dummy = torch.zeros(1, in_channels, 128, 128)
             dummy = self.features(dummy)
             self.flat_size = dummy.numel()
         self.classifier = nn.Sequential(
@@ -514,6 +592,7 @@ def main():
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
     parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
+    parser.add_argument("--region-attention", action="store_true", help="Use region attention map as second input channel")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -525,6 +604,7 @@ def main():
     print(f"Use face mask: {not args.no_mask}")
     print(f"Use severity weighting: {not args.no_severity}")
     print(f"Use augmentation: {args.augment}")
+    print(f"Use region attention: {args.region_attention}")
 
     repo_root = Path(".").resolve()
 
@@ -541,25 +621,29 @@ def main():
 
     train_dataset = TemperatureDataset(
         data["train"], data["annotations"], data["labels"], data["severities"],
-        repo_root, args.masks_dir, target_size, use_mask=use_mask, augment=args.augment
+        repo_root, args.masks_dir, target_size, use_mask=use_mask, augment=args.augment,
+        region_attention=args.region_attention,
     )
     val_dataset = TemperatureDataset(
         data["val"], data["annotations"], data["labels"], data["severities"],
-        repo_root, args.masks_dir, target_size, use_mask=use_mask
+        repo_root, args.masks_dir, target_size, use_mask=use_mask,
+        region_attention=args.region_attention,
     )
     test_dataset = TemperatureDataset(
         data["test"], data["annotations"], data["labels"], data["severities"],
-        repo_root, args.masks_dir, target_size, use_mask=use_mask
+        repo_root, args.masks_dir, target_size, use_mask=use_mask,
+        region_attention=args.region_attention,
     )
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
 
+    in_channels = 2 if args.region_attention else 1
     if args.model == "simple":
-        model = SimpleCNN(num_classes=2, dropout=args.dropout)
+        model = SimpleCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels)
     else:
-        model = DeeperCNN(num_classes=2, dropout=args.dropout)
+        model = DeeperCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels)
     model = model.to(device)
 
     class_weights = compute_class_weights(train_dataset, device)
@@ -623,6 +707,7 @@ def main():
         "use_face_mask": use_mask,
         "use_severity_weighting": not args.no_severity,
         "use_augmentation": args.augment,
+        "use_region_attention": args.region_attention,
         "target_size": args.target_size,
         "dropout": args.dropout,
         "lr": args.lr,
