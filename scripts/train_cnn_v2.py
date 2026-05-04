@@ -340,7 +340,7 @@ class TemperatureDataset(Dataset):
 class SimpleCNN(nn.Module):
     """Simple CNN for temperature matrix classification."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1, img_size: int = 64):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
@@ -350,11 +350,11 @@ class SimpleCNN(nn.Module):
         self.bn3 = nn.BatchNorm2d(128)
         self.pool = nn.MaxPool2d(2, 2)
         self.dropout = nn.Dropout(dropout)
-        self._init_fc(num_classes, in_channels)
+        self._init_fc(num_classes, in_channels, img_size)
 
-    def _init_fc(self, num_classes: int, in_channels: int):
+    def _init_fc(self, num_classes: int, in_channels: int, img_size: int):
         with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, 128, 128)
+            dummy = torch.zeros(1, in_channels, img_size, img_size)
             dummy = self.pool(F.relu(self.bn1(self.conv1(dummy))))
             dummy = self.pool(F.relu(self.bn2(self.conv2(dummy))))
             dummy = self.pool(F.relu(self.bn3(self.conv3(dummy))))
@@ -375,7 +375,7 @@ class SimpleCNN(nn.Module):
 class DeeperCNN(nn.Module):
     """Deeper CNN with more capacity."""
 
-    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1):
+    def __init__(self, num_classes: int = 2, dropout: float = 0.3, in_channels: int = 1, img_size: int = 64):
         super().__init__()
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
@@ -405,11 +405,11 @@ class DeeperCNN(nn.Module):
             nn.MaxPool2d(2),
             nn.Dropout2d(0.3),
         )
-        self._init_classifier(num_classes, dropout, in_channels)
+        self._init_classifier(num_classes, dropout, in_channels, img_size)
 
-    def _init_classifier(self, num_classes: int, dropout: float, in_channels: int):
+    def _init_classifier(self, num_classes: int, dropout: float, in_channels: int, img_size: int):
         with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, 128, 128)
+            dummy = torch.zeros(1, in_channels, img_size, img_size)
             dummy = self.features(dummy)
             self.flat_size = dummy.numel()
         self.classifier = nn.Sequential(
@@ -641,9 +641,9 @@ def main():
 
     in_channels = 2 if args.region_attention else 1
     if args.model == "simple":
-        model = SimpleCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels)
+        model = SimpleCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels, img_size=args.target_size)
     else:
-        model = DeeperCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels)
+        model = DeeperCNN(num_classes=2, dropout=args.dropout, in_channels=in_channels, img_size=args.target_size)
     model = model.to(device)
 
     class_weights = compute_class_weights(train_dataset, device)
