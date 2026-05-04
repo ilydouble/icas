@@ -261,7 +261,8 @@ def load_data(
     split = json.loads(split_path.read_text(encoding="utf-8"))
     excluded_ids = load_excluded_ids(excluded_path)
 
-    labels = dict(zip(clinical["canonical_patient_id"], clinical["label"].astype(int)))
+    clinical_valid = clinical.dropna(subset=["label"])
+    labels = dict(zip(clinical_valid["canonical_patient_id"], clinical_valid["label"].astype(int)))
 
     def filter_samples(patient_ids: list[str]) -> list[dict]:
         samples = []
