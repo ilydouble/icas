@@ -1,0 +1,78 @@
+# 完全排除所有图像文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+*.webp
+*.gz
+*.zip
+*.woff2
+.DS_Store
+# 完全排除所有文本文件
+*.txt
+dataset/**/*.txt
+dataset/**/*.csv
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+jspm_packages/
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Machine Learning specific
+*.pth
+*.pt
+*.pkl
+*.h5
+*.ckpt
+*.safetensors
+
+# Data files
+*.csv
+datasets/
+data/raw/
+data/processed/
+
+# Results directories
+*_results/
+runs/
+outputs/
+checkpoints/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+
+.next
+_next
+
+
+*.json
+*.npy
