@@ -9,6 +9,7 @@ Key features:
 Usage:
     python scripts/train_cnn_v2.py
     python scripts/train_cnn_v2.py --epochs 100 --device cuda
+    python scripts/train_cnn_v2.py --augment
 """
 
 from __future__ import annotations
@@ -74,8 +75,52 @@ def load_face_mask(mask_path: Path) -> np.ndarray:
     return (mask > 127).astype(np.float32)
 
 
-TEMP_RANGE_MIN = 20.0
-TEMP_RANGE_MAX = 45.0
+TEMP_RANGE_MIN = 15.0
+TEMP_RANGE_MAX = 40.0
+
+
+class TemperatureAugmentation:
+    """Data augmentation for temperature heatmaps.
+
+    Applies temperature-level and geometric augmentations.
+    Operates on normalized [0, 1] matrices.
+    """
+
+    def __init__(
+        self,
+        temp_offset_range: tuple[float, float] = (-2.0, 2.0),
+        temp_scale_range: tuple[float, float] = (0.95, 1.05),
+        noise_std: float = 0.2,
+        rotation_range: float = 5.0,
+        translation_range: int = 5,
+    ):
+        self.temp_offset_range = temp_offset_range
+        self.temp_scale_range = temp_scale_range
+        self.noise_std = noise_std
+        self.rotation_range = rotation_range
+        self.translation_range = translation_range
+
+    def __call__(self, matrix: np.ndarray) -> np.ndarray:
+        offset = np.random.uniform(*self.temp_offset_range)
+        scale = np.random.uniform(*self.temp_scale_range)
+        offset_norm = offset / (TEMP_RANGE_MAX - TEMP_RANGE_MIN)
+
+        augmented = matrix * scale + offset_norm
+
+        if self.noise_std > 0:
+            augmented = augmented + np.random.randn(*augmented.shape).astype(np.float32) * self.noise_std
+
+        if self.rotation_range > 0 or self.translation_range > 0:
+            h, w = augmented.shape
+            angle = np.random.uniform(-self.rotation_range, self.rotation_range)
+            M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+            if self.translation_range > 0:
+                tx = np.random.randint(-self.translation_range, self.translation_range + 1)
+                ty = np.random.randint(-self.translation_range, self.translation_range + 1)
+                M[:, 2] += [tx, ty]
+            augmented = cv2.warpAffine(augmented, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+
+        return augmented.clip(0.0, 1.0).astype(np.float32)
 
 
 def apply_face_mask(
@@ -159,6 +204,7 @@ class TemperatureDataset(Dataset):
         masks_dir: Path,
         target_size: tuple[int, int] = (128, 128),
         use_mask: bool = True,
+        augment: bool = False,
     ):
         self.samples = samples
         self.annotations = annotations
@@ -168,6 +214,8 @@ class TemperatureDataset(Dataset):
         self.masks_dir = masks_dir
         self.target_size = target_size
         self.use_mask = use_mask
+        self.augment = augment
+        self.augmentation = TemperatureAugmentation() if augment else None
         self._temp_cache: dict[str, np.ndarray] = {}
         self._mask_cache: dict[str, np.ndarray] = {}
 
@@ -204,6 +252,9 @@ class TemperatureDataset(Dataset):
             masked_temp = np.clip(
                 (temp_resized - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0
             ).astype(np.float32)
+
+        if self.augmentation is not None:
+            masked_temp = self.augmentation(masked_temp)
 
         x = torch.from_numpy(masked_temp).unsqueeze(0).float()
         y = torch.tensor(self.labels.get(patient_id, 0), dtype=torch.long)
@@ -466,6 +517,7 @@ def main():
     parser.add_argument("--model", type=str, default="simple", choices=["simple", "deeper"])
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
+    parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -476,6 +528,7 @@ def main():
     print(f"Device: {device}")
     print(f"Use face mask: {not args.no_mask}")
     print(f"Use severity weighting: {not args.no_severity}")
+    print(f"Use augmentation: {args.augment}")
 
     repo_root = Path(".").resolve()
 
@@ -492,7 +545,7 @@ def main():
 
     train_dataset = TemperatureDataset(
         data["train"], data["annotations"], data["labels"], data["severities"],
-        repo_root, args.masks_dir, target_size, use_mask=use_mask
+        repo_root, args.masks_dir, target_size, use_mask=use_mask, augment=args.augment
     )
     val_dataset = TemperatureDataset(
         data["val"], data["annotations"], data["labels"], data["severities"],
@@ -573,6 +626,7 @@ def main():
         "best_epoch": best_epoch,
         "use_face_mask": use_mask,
         "use_severity_weighting": not args.no_severity,
+        "use_augmentation": args.augment,
         "target_size": args.target_size,
         "dropout": args.dropout,
         "lr": args.lr,
