@@ -144,43 +144,60 @@ class TemperatureAugmentation:
 
     Applies temperature-level and geometric augmentations.
     Operates on normalized [0, 1] matrices.
+    Synchronously transforms both temperature and attention map.
     """
 
     def __init__(
         self,
-        temp_offset_range: tuple[float, float] = (-2.0, 2.0),
+        temp_offset_range: tuple[float, float] = (-1.0, 1.0),
         temp_scale_range: tuple[float, float] = (0.95, 1.05),
-        noise_std: float = 0.2,
+        noise_std: float = 0.02,
         rotation_range: float = 5.0,
         translation_range: int = 5,
+        p_flip: float = 0.5,
     ):
         self.temp_offset_range = temp_offset_range
         self.temp_scale_range = temp_scale_range
         self.noise_std = noise_std
         self.rotation_range = rotation_range
         self.translation_range = translation_range
+        self.p_flip = p_flip
 
-    def __call__(self, matrix: np.ndarray) -> np.ndarray:
+    def __call__(
+        self,
+        matrix: np.ndarray,
+        attention_map: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
         offset = np.random.uniform(*self.temp_offset_range)
         scale = np.random.uniform(*self.temp_scale_range)
         offset_norm = offset / (TEMP_RANGE_MAX - TEMP_RANGE_MIN)
 
-        augmented = matrix * scale + offset_norm
+        aug_matrix = matrix * scale + offset_norm
 
         if self.noise_std > 0:
-            augmented = augmented + np.random.randn(*augmented.shape).astype(np.float32) * self.noise_std
+            aug_matrix = aug_matrix + np.random.randn(*aug_matrix.shape).astype(np.float32) * self.noise_std
+
+        aug_matrix = aug_matrix.clip(0.0, 1.0).astype(np.float32)
+        aug_attention = attention_map.copy() if attention_map is not None else None
+
+        if np.random.rand() < self.p_flip:
+            aug_matrix = cv2.flip(aug_matrix, 1)
+            if aug_attention is not None:
+                aug_attention = cv2.flip(aug_attention, 1)
 
         if self.rotation_range > 0 or self.translation_range > 0:
-            h, w = augmented.shape
+            h, w = aug_matrix.shape
             angle = np.random.uniform(-self.rotation_range, self.rotation_range)
             M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
             if self.translation_range > 0:
                 tx = np.random.randint(-self.translation_range, self.translation_range + 1)
                 ty = np.random.randint(-self.translation_range, self.translation_range + 1)
                 M[:, 2] += [tx, ty]
-            augmented = cv2.warpAffine(augmented, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+            aug_matrix = cv2.warpAffine(aug_matrix, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0.0)
+            if aug_attention is not None:
+                aug_attention = cv2.warpAffine(aug_attention, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0.0)
 
-        return augmented.clip(0.0, 1.0).astype(np.float32)
+        return aug_matrix, aug_attention
 
 
 def apply_face_mask(
@@ -418,11 +435,17 @@ class TemperatureDataset(Dataset):
                 (temp_resized - TEMP_RANGE_MIN) / (TEMP_RANGE_MAX - TEMP_RANGE_MIN), 0.0, 1.0
             ).astype(np.float32)
 
-        if self.augmentation is not None:
-            masked_temp = self.augmentation(masked_temp)
-
         if self.region_attention:
             attention_map = self._get_attention_map(sample_id, temp_matrix.shape)
+        else:
+            attention_map = None
+
+        if self.augmentation is not None:
+            masked_temp, attention_map = self.augmentation(masked_temp, attention_map)
+
+        if self.region_attention:
+            if attention_map is None:
+                attention_map = np.zeros(self.target_size, dtype=np.float32)
             x = torch.from_numpy(np.stack([masked_temp, attention_map], axis=0)).float()
         else:
             x = torch.from_numpy(masked_temp).unsqueeze(0).float()
