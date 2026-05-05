@@ -826,6 +826,42 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) 
     return metrics
 
 
+def find_best_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    metric: str = "f1",
+) -> tuple[float, dict]:
+    """Pick a probability threshold on the validation set.
+
+    We optimize a thresholded metric while preserving AUC reporting separately.
+    For this project, F1 is the default because the ranking quality can be good
+    while the default 0.5 operating point is poor.
+    """
+    if len(y_true) == 0:
+        return 0.5, compute_metrics(y_true, y_true, y_prob)
+
+    thresholds = sorted({0.0, 1.0, *[float(x) for x in y_prob.tolist()]})
+    best_threshold = 0.5
+    best_metrics = compute_metrics(y_true, (y_prob >= 0.5).astype(int), y_prob)
+    best_score = best_metrics[metric]
+
+    for threshold in thresholds:
+        preds = (y_prob >= threshold).astype(int)
+        metrics = compute_metrics(y_true, preds, y_prob)
+        score = metrics[metric]
+        if score > best_score + 1e-12 or (
+            abs(score - best_score) <= 1e-12 and abs(threshold - 0.5) < abs(best_threshold - 0.5)
+        ):
+            best_threshold = threshold
+            best_metrics = metrics
+            best_score = score
+
+    best_metrics = dict(best_metrics)
+    best_metrics["threshold"] = float(best_threshold)
+    best_metrics["optimized_metric"] = metric
+    return float(best_threshold), best_metrics
+
+
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -861,7 +897,7 @@ def evaluate(
     device: torch.device,
     multi_task: bool = False,
     soft_label: bool = False,
-) -> tuple[dict, list[str]]:
+) -> tuple[dict, list[str], np.ndarray, np.ndarray]:
     model.eval()
     all_preds = []
     all_probs = []
@@ -892,7 +928,9 @@ def evaluate(
         np.array(all_preds),
         np.array(all_probs),
     )
-    return metrics, all_ids
+    labels = np.array(all_labels)
+    probs = np.array(all_probs)
+    return metrics, all_ids, labels, probs
 
 
 def main():
@@ -927,6 +965,7 @@ def main():
     parser.add_argument("--early-stop-min-epochs", type=int, default=8, help="Do not early-stop before this epoch")
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4, help="Minimum AUC gain to reset patience")
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze MobileNet features for the first N epochs")
+    parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"], help="Validation metric used to choose the classification threshold")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -1074,7 +1113,7 @@ def main():
             multi_task=multi_task,
             grad_clip=args.grad_clip,
         )
-        val_metrics, _ = evaluate(model, val_loader, device, multi_task=multi_task, soft_label=soft_label)
+        val_metrics, _, _, _ = evaluate(model, val_loader, device, multi_task=multi_task, soft_label=soft_label)
         scheduler.step()
 
         history.append({
@@ -1106,13 +1145,31 @@ def main():
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    test_metrics, _ = evaluate(model, test_loader, device, multi_task=multi_task, soft_label=soft_label)
+    val_metrics, _, val_labels, val_probs = evaluate(
+        model, val_loader, device, multi_task=multi_task, soft_label=soft_label
+    )
+    best_threshold, val_threshold_metrics = find_best_threshold(
+        val_labels, val_probs, metric=args.threshold_metric
+    )
+    test_metrics, _, test_labels, test_probs = evaluate(
+        model, test_loader, device, multi_task=multi_task, soft_label=soft_label
+    )
+    test_threshold_preds = (test_probs >= best_threshold).astype(int)
+    test_threshold_metrics = compute_metrics(test_labels, test_threshold_preds, test_probs)
+    test_threshold_metrics["threshold"] = best_threshold
+    test_threshold_metrics["optimized_metric"] = args.threshold_metric
 
     print(f"\n{'='*50}")
     print("Test Results")
     print(f"{'='*50}")
     for k, v in test_metrics.items():
         print(f"  {k}: {v:.4f}")
+    print("Threshold-tuned Test Results")
+    for k, v in test_threshold_metrics.items():
+        if isinstance(v, float):
+            print(f"  {k}: {v:.4f}")
+        else:
+            print(f"  {k}: {v}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results = {
@@ -1136,8 +1193,11 @@ def main():
         "early_stop_patience": args.early_stop_patience,
         "early_stop_min_epochs": args.early_stop_min_epochs,
         "freeze_backbone_epochs": args.freeze_backbone_epochs if args.model == "mobilenet" else 0,
+        "threshold_metric": args.threshold_metric,
         "batch_size": args.batch_size,
         "test_metrics": test_metrics,
+        "val_threshold_metrics": val_threshold_metrics,
+        "test_threshold_metrics": test_threshold_metrics,
     }
 
     results_path = args.output / f"cnn_v2_results_{timestamp}.json"

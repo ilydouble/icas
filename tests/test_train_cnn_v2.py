@@ -10,6 +10,7 @@ import torch
 from scripts.train_cnn_v2 import (
     EarlyStopping,
     apply_face_mask,
+    find_best_threshold,
     severity_to_regression_target,
 )
 
@@ -38,6 +39,15 @@ class EarlyStoppingTests(unittest.TestCase):
         self.assertFalse(stopper.step(3, 0.61))
         self.assertFalse(stopper.step(4, 0.61))
         self.assertTrue(stopper.step(5, 0.61))
+
+
+class ThresholdSelectionTests(unittest.TestCase):
+    def test_find_best_threshold_maximizes_f1(self):
+        y_true = np.array([0, 0, 1, 1], dtype=np.int64)
+        y_prob = np.array([0.2, 0.4, 0.6, 0.9], dtype=np.float32)
+        threshold, metrics = find_best_threshold(y_true, y_prob)
+        self.assertAlmostEqual(threshold, 0.5, places=6)
+        self.assertAlmostEqual(metrics["f1"], 1.0, places=6)
 
 
 if __name__ == "__main__":
