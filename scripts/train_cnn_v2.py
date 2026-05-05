@@ -862,6 +862,33 @@ def find_best_threshold(
     return float(best_threshold), best_metrics
 
 
+def aggregate_patient_predictions(
+    sample_ids: list[str],
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    sample_to_patient: dict[str, str],
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Aggregate sample-level predictions into patient-level mean scores."""
+    patient_order: list[str] = []
+    patient_prob_buckets: dict[str, list[float]] = {}
+    patient_labels: dict[str, int] = {}
+
+    for sample_id, label, prob in zip(sample_ids, y_true, y_prob):
+        patient_id = sample_to_patient[sample_id]
+        if patient_id not in patient_prob_buckets:
+            patient_order.append(patient_id)
+            patient_prob_buckets[patient_id] = []
+            patient_labels[patient_id] = int(label)
+        patient_prob_buckets[patient_id].append(float(prob))
+
+    labels = np.array([patient_labels[pid] for pid in patient_order], dtype=np.int64)
+    probs = np.array(
+        [float(np.mean(patient_prob_buckets[pid])) for pid in patient_order],
+        dtype=np.float32,
+    )
+    return patient_order, labels, probs
+
+
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -1145,19 +1172,55 @@ def main():
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    val_metrics, _, val_labels, val_probs = evaluate(
+    val_metrics, val_ids, val_labels, val_probs = evaluate(
         model, val_loader, device, multi_task=multi_task, soft_label=soft_label
     )
     best_threshold, val_threshold_metrics = find_best_threshold(
         val_labels, val_probs, metric=args.threshold_metric
     )
-    test_metrics, _, test_labels, test_probs = evaluate(
+    test_metrics, test_ids, test_labels, test_probs = evaluate(
         model, test_loader, device, multi_task=multi_task, soft_label=soft_label
     )
     test_threshold_preds = (test_probs >= best_threshold).astype(int)
     test_threshold_metrics = compute_metrics(test_labels, test_threshold_preds, test_probs)
     test_threshold_metrics["threshold"] = best_threshold
     test_threshold_metrics["optimized_metric"] = args.threshold_metric
+
+    sample_to_patient = {
+        sample["sample_id"]: sample["canonical_patient_id"]
+        for sample in (data["val"] + data["test"])
+    }
+    _, val_patient_labels, val_patient_probs = aggregate_patient_predictions(
+        val_ids,
+        val_labels,
+        val_probs,
+        sample_to_patient,
+    )
+    _, test_patient_labels, test_patient_probs = aggregate_patient_predictions(
+        test_ids,
+        test_labels,
+        test_probs,
+        sample_to_patient,
+    )
+    patient_default_preds = (test_patient_probs >= 0.5).astype(int)
+    patient_metrics = compute_metrics(
+        test_patient_labels,
+        patient_default_preds,
+        test_patient_probs,
+    )
+    patient_threshold, val_patient_threshold_metrics = find_best_threshold(
+        val_patient_labels,
+        val_patient_probs,
+        metric=args.threshold_metric,
+    )
+    patient_threshold_preds = (test_patient_probs >= patient_threshold).astype(int)
+    patient_threshold_metrics = compute_metrics(
+        test_patient_labels,
+        patient_threshold_preds,
+        test_patient_probs,
+    )
+    patient_threshold_metrics["threshold"] = patient_threshold
+    patient_threshold_metrics["optimized_metric"] = args.threshold_metric
 
     print(f"\n{'='*50}")
     print("Test Results")
@@ -1166,6 +1229,15 @@ def main():
         print(f"  {k}: {v:.4f}")
     print("Threshold-tuned Test Results")
     for k, v in test_threshold_metrics.items():
+        if isinstance(v, float):
+            print(f"  {k}: {v:.4f}")
+        else:
+            print(f"  {k}: {v}")
+    print("Patient-level Test Results")
+    for k, v in patient_metrics.items():
+        print(f"  {k}: {v:.4f}")
+    print("Patient-level Threshold-tuned Test Results")
+    for k, v in patient_threshold_metrics.items():
         if isinstance(v, float):
             print(f"  {k}: {v:.4f}")
         else:
@@ -1198,6 +1270,9 @@ def main():
         "test_metrics": test_metrics,
         "val_threshold_metrics": val_threshold_metrics,
         "test_threshold_metrics": test_threshold_metrics,
+        "patient_test_metrics": patient_metrics,
+        "val_patient_threshold_metrics": val_patient_threshold_metrics,
+        "patient_test_threshold_metrics": patient_threshold_metrics,
     }
 
     results_path = args.output / f"cnn_v2_results_{timestamp}.json"

@@ -9,6 +9,7 @@ import torch
 
 from scripts.train_cnn_v2 import (
     EarlyStopping,
+    aggregate_patient_predictions,
     apply_face_mask,
     find_best_threshold,
     severity_to_regression_target,
@@ -48,6 +49,20 @@ class ThresholdSelectionTests(unittest.TestCase):
         threshold, metrics = find_best_threshold(y_true, y_prob)
         self.assertAlmostEqual(threshold, 0.5, places=6)
         self.assertAlmostEqual(metrics["f1"], 1.0, places=6)
+
+
+class PatientAggregationTests(unittest.TestCase):
+    def test_patient_aggregation_uses_mean_probability(self):
+        sample_ids = ["A_1", "A_2", "B_1"]
+        y_true = np.array([1, 1, 0], dtype=np.int64)
+        y_prob = np.array([0.8, 0.4, 0.2], dtype=np.float32)
+        sample_to_patient = {"A_1": "A", "A_2": "A", "B_1": "B"}
+        patient_ids, patient_labels, patient_probs = aggregate_patient_predictions(
+            sample_ids, y_true, y_prob, sample_to_patient
+        )
+        self.assertEqual(patient_ids, ["A", "B"])
+        np.testing.assert_allclose(patient_labels, np.array([1, 0], dtype=np.int64))
+        np.testing.assert_allclose(patient_probs, np.array([0.6, 0.2], dtype=np.float32))
 
 
 if __name__ == "__main__":
