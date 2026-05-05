@@ -51,7 +51,7 @@ from sklearn.metrics import (
 
 warnings.filterwarnings("ignore")
 
-SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0}
+SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 1.5, 3: 2.0}
 
 
 def parse_temperature_csv(path: Path) -> np.ndarray:
@@ -81,6 +81,67 @@ def load_face_mask(mask_path: Path) -> np.ndarray:
     if mask is None:
         return None
     return (mask > 127).astype(np.float32)
+
+
+def severity_to_regression_target(severities: Tensor) -> Tensor:
+    """Map stenosis grades onto a compact [0, 1] regression target.
+
+    The auxiliary task is only evaluated on positive samples. Mapping
+    mild/moderate/severe to 0.0/0.5/1.0 keeps the target well-scaled and
+    reduces the tendency of raw MSE on {1,2,3} to dominate classification.
+    """
+    targets = torch.zeros_like(severities, dtype=torch.float32)
+    targets = torch.where(severities >= 3, torch.ones_like(targets), targets)
+    targets = torch.where((severities >= 2) & (severities < 3), torch.full_like(targets, 0.5), targets)
+    return targets
+
+
+def compute_sample_weights(
+    targets: Tensor,
+    severities: Tensor,
+    class_weights: Tensor,
+    severity_weights: dict[int, float],
+) -> Tensor:
+    """Combine class balancing with a mild severity emphasis for positives."""
+    sample_weights = torch.ones_like(targets, dtype=torch.float32)
+    neg_mask = targets == 0
+    sample_weights[neg_mask] = class_weights[0]
+
+    pos_mask = targets == 1
+    if pos_mask.any():
+        pos_severities = severities[pos_mask]
+        severity_scale = torch.ones_like(pos_severities, dtype=torch.float32)
+        for sev, scale in severity_weights.items():
+            severity_scale = torch.where(
+                pos_severities == float(sev),
+                torch.full_like(severity_scale, float(scale)),
+                severity_scale,
+            )
+        sample_weights[pos_mask] = class_weights[1] * severity_scale
+    return sample_weights
+
+
+class EarlyStopping:
+    """Stop training after sustained validation stagnation."""
+
+    def __init__(self, patience: int, min_epochs: int, min_delta: float = 0.0):
+        self.patience = max(0, patience)
+        self.min_epochs = max(1, min_epochs)
+        self.min_delta = min_delta
+        self.best_score = float("-inf")
+        self.bad_epochs = 0
+
+    def step(self, epoch: int, score: float) -> bool:
+        if score > self.best_score + self.min_delta:
+            self.best_score = score
+            self.bad_epochs = 0
+            return False
+
+        if epoch < self.min_epochs:
+            return False
+
+        self.bad_epochs += 1
+        return self.bad_epochs > self.patience
 
 
 TEMP_RANGE_MIN = 15.0
@@ -216,7 +277,7 @@ def apply_face_mask(
     """
     temp_h, temp_w = temp_matrix.shape
 
-    if mask is not None and mask.shape[0] != temp_h or mask.shape[1] != temp_w:
+    if mask is not None and (mask.shape[0] != temp_h or mask.shape[1] != temp_w):
         mask = cv2.resize(mask, (temp_w, temp_h), interpolation=cv2.INTER_NEAREST)
 
     temp_norm = np.clip(
@@ -251,16 +312,9 @@ class SeverityWeightedLoss(nn.Module):
 
     def forward(self, logits: Tensor, targets: Tensor, severities: Tensor) -> Tensor:
         ce_loss = self.ce(logits, targets)
-
-        sample_weights = torch.ones_like(ce_loss)
-        for i in range(len(targets)):
-            if targets[i] == 1:
-                sev = int(severities[i].item()) if not torch.isnan(severities[i]) else 1
-                sev_weight = self.severity_weights.get(sev, 1.0)
-                sample_weights[i] = self.class_weights[1] * sev_weight
-            else:
-                sample_weights[i] = self.class_weights[0]
-
+        sample_weights = compute_sample_weights(
+            targets, severities, self.class_weights, self.severity_weights
+        )
         return (ce_loss * sample_weights).mean()
 
 
@@ -271,12 +325,19 @@ class MultiTaskLoss(nn.Module):
     Auxiliary task: severity regression (only computed on positive samples)
     """
 
-    def __init__(self, class_weights: Tensor, lambda_sev: float = 0.3):
+    def __init__(
+        self,
+        class_weights: Tensor,
+        severity_weights: dict[int, float],
+        lambda_sev: float = 0.3,
+        severity_beta: float = 0.25,
+    ):
         super().__init__()
         self.register_buffer("class_weights", class_weights)
+        self.severity_weights = severity_weights
         self.lambda_sev = lambda_sev
-        self.cls_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
-        self.sev_loss_fn = nn.MSELoss()
+        self.cls_loss_fn = nn.CrossEntropyLoss(reduction="none")
+        self.sev_loss_fn = nn.SmoothL1Loss(beta=severity_beta)
 
     def forward(
         self,
@@ -285,12 +346,16 @@ class MultiTaskLoss(nn.Module):
         targets_cls: Tensor,
         targets_sev: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor]:
-        loss_cls = self.cls_loss_fn(logits_cls, targets_cls)
+        cls_losses = self.cls_loss_fn(logits_cls, targets_cls)
+        sample_weights = compute_sample_weights(
+            targets_cls, targets_sev, self.class_weights, self.severity_weights
+        )
+        loss_cls = (cls_losses * sample_weights).mean()
 
         pos_mask = targets_cls == 1
         if pos_mask.sum() > 0:
             pos_logits_sev = logits_sev[pos_mask].squeeze(-1)
-            pos_targets_sev = targets_sev[pos_mask].float()
+            pos_targets_sev = severity_to_regression_target(targets_sev[pos_mask])
             loss_sev = self.sev_loss_fn(pos_logits_sev, pos_targets_sev)
         else:
             loss_sev = torch.tensor(0.0, device=logits_cls.device)
@@ -655,6 +720,10 @@ class MobileNetV3Small(nn.Module):
         if multi_task:
             self.severity_head = nn.Linear(feature_dim, 1)
 
+    def set_backbone_trainable(self, trainable: bool) -> None:
+        for param in self.backbone.features.parameters():
+            param.requires_grad = trainable
+
     def forward(self, x: Tensor) -> Tensor | tuple[Tensor, Tensor]:
         features = self.backbone(x)
         logits_cls = self.classifier_head(features)
@@ -764,6 +833,7 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     multi_task: bool = False,
+    grad_clip: float = 0.0,
 ) -> float:
     model.train()
     total_loss = 0.0
@@ -777,6 +847,8 @@ def train_epoch(
             logits = model(x)
             loss = criterion(logits, y, sev)
         loss.backward()
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         total_loss += loss.item() * x.size(0)
     return total_loss / len(loader.dataset)
@@ -839,6 +911,7 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--target-size", type=int, default=64)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet"])
     parser.add_argument("--no-pretrained", action="store_true", help="Disable pretrained weights (for mobilenet)")
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
@@ -848,6 +921,12 @@ def main():
     parser.add_argument("--multi-task", action="store_true", help="Enable multi-task learning (classification + severity regression)")
     parser.add_argument("--soft-label", action="store_true", help="Use soft labels for classification (requires --multi-task)")
     parser.add_argument("--lambda-sev", type=float, default=0.3, help="Severity loss weight for multi-task learning")
+    parser.add_argument("--severity-beta", type=float, default=0.25, help="SmoothL1 beta for severity regression")
+    parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient clipping max norm; 0 disables clipping")
+    parser.add_argument("--early-stop-patience", type=int, default=8, help="Stop after this many non-improving epochs")
+    parser.add_argument("--early-stop-min-epochs", type=int, default=8, help="Do not early-stop before this epoch")
+    parser.add_argument("--early-stop-min-delta", type=float, default=1e-4, help="Minimum AUC gain to reset patience")
+    parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze MobileNet features for the first N epochs")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -855,6 +934,10 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     print(f"Device: {device}")
     print(f"Use face mask: {not args.no_mask}")
     print(f"Use severity weighting: {not args.no_severity}")
@@ -863,10 +946,13 @@ def main():
     print(f"Use multi-task learning: {args.multi_task}")
     print(f"Use soft labels: {args.soft_label}")
     print(f"Model: {args.model}")
+    print(f"Seed: {args.seed}")
     if args.model == "mobilenet":
         print(f"Use pretrained: {not args.no_pretrained}")
+        print(f"Freeze backbone epochs: {args.freeze_backbone_epochs}")
 
     repo_root = Path(".").resolve()
+    args.output.mkdir(parents=True, exist_ok=True)
 
     print("\nLoading data...")
     data = load_data(
@@ -942,7 +1028,12 @@ def main():
     if soft_label:
         criterion = MultiTaskSoftLabelLoss(lambda_sev=args.lambda_sev)
     elif multi_task:
-        criterion = MultiTaskLoss(class_weights, lambda_sev=args.lambda_sev)
+        criterion = MultiTaskLoss(
+            class_weights,
+            SEVERITY_MULTIPLIER,
+            lambda_sev=args.lambda_sev,
+            severity_beta=args.severity_beta,
+        )
     elif args.no_severity:
         criterion = SeverityWeightedLoss(class_weights, {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0})
     else:
@@ -950,14 +1041,39 @@ def main():
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
+    early_stopper = EarlyStopping(
+        patience=args.early_stop_patience,
+        min_epochs=args.early_stop_min_epochs,
+        min_delta=args.early_stop_min_delta,
+    )
 
     best_val_auc = 0.0
     best_epoch = 0
     history: list[dict] = []
+    backbone_trainable = True
 
     print(f"\nTraining for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, multi_task=multi_task)
+        should_train_backbone = not (
+            args.model == "mobilenet"
+            and args.freeze_backbone_epochs > 0
+            and epoch <= args.freeze_backbone_epochs
+        )
+        if args.model == "mobilenet" and should_train_backbone != backbone_trainable:
+            model.set_backbone_trainable(should_train_backbone)
+            backbone_trainable = should_train_backbone
+            state = "trainable" if should_train_backbone else "frozen"
+            print(f"  Epoch {epoch:3d}: backbone is now {state}")
+
+        train_loss = train_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            multi_task=multi_task,
+            grad_clip=args.grad_clip,
+        )
         val_metrics, _ = evaluate(model, val_loader, device, multi_task=multi_task, soft_label=soft_label)
         scheduler.step()
 
@@ -980,6 +1096,10 @@ def main():
             print(f"  Epoch {epoch:3d}: loss={train_loss:.4f} "
                   f"val_auc={val_metrics['auc_roc']:.4f} "
                   f"val_f1={val_metrics['f1']:.4f}")
+
+        if early_stopper.step(epoch, val_metrics["auc_roc"]):
+            print(f"Early stopping at epoch {epoch}: no val_auc improvement for {args.early_stop_patience} epochs.")
+            break
 
     print(f"\nBest validation AUC: {best_val_auc:.4f} at epoch {best_epoch}")
 
@@ -1006,14 +1126,20 @@ def main():
         "use_multi_task": multi_task,
         "use_soft_label": soft_label,
         "lambda_sev": args.lambda_sev if multi_task else None,
+        "severity_beta": args.severity_beta if multi_task and not soft_label else None,
         "target_size": args.target_size,
         "dropout": args.dropout,
         "lr": args.lr,
+        "weight_decay": args.weight_decay,
+        "seed": args.seed,
+        "grad_clip": args.grad_clip,
+        "early_stop_patience": args.early_stop_patience,
+        "early_stop_min_epochs": args.early_stop_min_epochs,
+        "freeze_backbone_epochs": args.freeze_backbone_epochs if args.model == "mobilenet" else 0,
         "batch_size": args.batch_size,
         "test_metrics": test_metrics,
     }
 
-    args.output.mkdir(parents=True, exist_ok=True)
     results_path = args.output / f"cnn_v2_results_{timestamp}.json"
     with results_path.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, default=str)

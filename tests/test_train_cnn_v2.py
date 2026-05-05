@@ -1,0 +1,44 @@
+"""Unit tests for train_cnn_v2 utilities."""
+
+from __future__ import annotations
+
+import unittest
+
+import numpy as np
+import torch
+
+from scripts.train_cnn_v2 import (
+    EarlyStopping,
+    apply_face_mask,
+    severity_to_regression_target,
+)
+
+
+class SeverityTargetTests(unittest.TestCase):
+    def test_severity_targets_are_normalized_for_positive_cases(self):
+        values = torch.tensor([0.0, 1.0, 2.0, 3.0], dtype=torch.float32)
+        targets = severity_to_regression_target(values)
+        expected = torch.tensor([0.0, 0.0, 0.5, 1.0], dtype=torch.float32)
+        self.assertTrue(torch.allclose(targets, expected))
+
+
+class ApplyFaceMaskTests(unittest.TestCase):
+    def test_apply_face_mask_handles_missing_mask(self):
+        temp = np.array([[20.0, 25.0], [30.0, 35.0]], dtype=np.float32)
+        out = apply_face_mask(temp, None, target_size=(2, 2))
+        self.assertEqual(out.shape, (2, 2))
+        self.assertTrue(np.isfinite(out).all())
+
+
+class EarlyStoppingTests(unittest.TestCase):
+    def test_early_stopping_waits_for_patience_after_min_epochs(self):
+        stopper = EarlyStopping(patience=2, min_epochs=3, min_delta=1e-4)
+        self.assertFalse(stopper.step(1, 0.60))
+        self.assertFalse(stopper.step(2, 0.62))
+        self.assertFalse(stopper.step(3, 0.61))
+        self.assertFalse(stopper.step(4, 0.61))
+        self.assertTrue(stopper.step(5, 0.61))
+
+
+if __name__ == "__main__":
+    unittest.main()
