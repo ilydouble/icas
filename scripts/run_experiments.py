@@ -69,13 +69,22 @@ DEFAULT_TRAINING_ARGS = {
 }
 
 
-def build_command(params: dict, npy_dir: str | None = None) -> list[str]:
+def build_command(
+    params: dict,
+    npy_dir: str | None = None,
+    batch_size: int | None = None,
+    device: str | None = None,
+) -> list[str]:
     cmd = [sys.executable, "scripts/train_cnn_v2.py"]
     if npy_dir:
         cmd.extend(["--npy-dir", npy_dir])
 
     merged = dict(DEFAULT_TRAINING_ARGS)
     merged.update(params)
+    if batch_size is not None:
+        merged["batch-size"] = batch_size
+    if device is not None:
+        merged["device"] = device
     for key, value in merged.items():
         if isinstance(value, bool) and value:
             cmd.append(f"--{key}")
@@ -84,8 +93,15 @@ def build_command(params: dict, npy_dir: str | None = None) -> list[str]:
     return cmd
 
 
-def run_experiment(exp_id: int, params: dict, output_dir: Path, npy_dir: str | None = None) -> dict:
-    cmd = build_command(params, npy_dir)
+def run_experiment(
+    exp_id: int,
+    params: dict,
+    output_dir: Path,
+    npy_dir: str | None = None,
+    batch_size: int | None = None,
+    device: str | None = None,
+) -> dict:
+    cmd = build_command(params, npy_dir, batch_size=batch_size, device=device)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_name = f"exp_{exp_id:03d}_{timestamp}"
     log_file = output_dir / f"{exp_name}.log"
@@ -155,14 +171,20 @@ def resolve_experiments(preset: str, quick: bool) -> list[dict]:
     return CHAMPION_EXPERIMENTS
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=["champion", "legacy"], default="champion")
     parser.add_argument("--quick", action="store_true", help="Run a smaller champion-focused subset")
     parser.add_argument("--output-dir", type=Path, default=Path("reports/experiments"))
     parser.add_argument("--start-from", type=int, default=1, help="Start from experiment ID")
     parser.add_argument("--npy-dir", type=str, default="datasets/npy_temperature", help="NPY cache directory")
-    args = parser.parse_args()
+    parser.add_argument("--batch-size", type=int, help="Override batch size for all experiments")
+    parser.add_argument("--device", type=str, help="Override device for all experiments, e.g. cuda or cuda:1")
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
 
     experiments = resolve_experiments(args.preset, args.quick)
     output_dir = args.output_dir
@@ -177,6 +199,10 @@ def main() -> None:
     print(f"Preset: {args.preset}")
     print(f"Total experiments: {len(experiments)}")
     print(f"Output directory: {output_dir}")
+    if args.batch_size is not None:
+        print(f"Batch size override: {args.batch_size}")
+    if args.device is not None:
+        print(f"Device override: {args.device}")
     print(f"Start time: {datetime.now()}")
 
     all_results = []
@@ -184,7 +210,14 @@ def main() -> None:
         if i < args.start_from:
             print(f"Skipping experiment {i}")
             continue
-        result = run_experiment(i, params, output_dir, npy_dir)
+        result = run_experiment(
+            i,
+            params,
+            output_dir,
+            npy_dir,
+            batch_size=args.batch_size,
+            device=args.device,
+        )
         all_results.append(result)
 
         summary_path = output_dir / "experiment_summary.json"
