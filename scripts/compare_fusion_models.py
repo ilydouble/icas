@@ -29,18 +29,29 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.feature_selection import SelectPercentile, f_classif
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from torch.utils.data import DataLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.compare_models import (
-    FEATURE_META_COLS,
-    binary_metrics,
-    compute_severity_weights,
-    model_configs,
-)
 from scripts.train_cnn_v2 import (
     DeeperCNN,
     MobileNetV3Small,
@@ -50,6 +61,10 @@ from scripts.train_cnn_v2 import (
 )
 
 warnings.filterwarnings("ignore")
+
+SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0}
+_DEFAULT_PERCENTILE = 50
+_PERCENTILE_GRID = [30, 50, 70]
 
 CLINICAL_EXCLUDE_COLS = {
     "canonical_patient_id",
@@ -67,6 +82,75 @@ CLINICAL_EXCLUDE_COLS = {
     "images_2024",
     "images_2025",
 }
+
+
+def _pipe(estimator) -> Pipeline:
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("selector", SelectPercentile(f_classif, percentile=_DEFAULT_PERCENTILE)),
+        ("clf", estimator),
+    ])
+
+
+def model_configs() -> list[dict]:
+    pg = _PERCENTILE_GRID
+    return [
+        {
+            "name": "LogisticRegression",
+            "pipeline": _pipe(LogisticRegression(max_iter=2000, random_state=42, class_weight="balanced")),
+            "pipeline_sw": _pipe(LogisticRegression(max_iter=2000, random_state=42)),
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__C": [0.01, 0.1, 1, 10],
+            },
+            "supports_sample_weight": True,
+        },
+        {
+            "name": "SVM_RBF",
+            "pipeline": _pipe(SVC(kernel="rbf", random_state=42, class_weight="balanced", probability=True)),
+            "pipeline_sw": _pipe(SVC(kernel="rbf", random_state=42, probability=True)),
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__C": [0.1, 1, 10],
+                "clf__gamma": ["scale", "auto"],
+            },
+            "supports_sample_weight": True,
+        },
+        {
+            "name": "KNN",
+            "pipeline": _pipe(KNeighborsClassifier()),
+            "pipeline_sw": None,
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__n_neighbors": [3, 5, 9, 15],
+            },
+            "supports_sample_weight": False,
+        },
+        {
+            "name": "RandomForest",
+            "pipeline": _pipe(RandomForestClassifier(random_state=42, class_weight="balanced_subsample")),
+            "pipeline_sw": _pipe(RandomForestClassifier(random_state=42)),
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__n_estimators": [100, 300],
+                "clf__max_depth": [None, 5, 10],
+            },
+            "supports_sample_weight": True,
+        },
+        {
+            "name": "GradientBoosting",
+            "pipeline": _pipe(GradientBoostingClassifier(random_state=42)),
+            "pipeline_sw": _pipe(GradientBoostingClassifier(random_state=42)),
+            "param_grid": {
+                "selector__percentile": pg,
+                "clf__n_estimators": [100, 200],
+                "clf__learning_rate": [0.05, 0.1],
+                "clf__max_depth": [3, 5],
+            },
+            "supports_sample_weight": True,
+        },
+    ]
 
 
 def select_clinical_feature_columns(clinical: pd.DataFrame) -> list[str]:
@@ -98,6 +182,34 @@ def normalize_feature_set_names(spec: str | None, available: list[str]) -> list[
     if unknown:
         raise ValueError(f"Unknown feature set(s): {', '.join(unknown)}")
     return wanted
+
+
+def compute_severity_weights(y: np.ndarray, stenosis: np.ndarray) -> np.ndarray:
+    n_neg = int((y == 0).sum())
+    n_pos = int((y == 1).sum())
+    base_pos = n_neg / n_pos if n_pos > 0 else 1.0
+
+    weights = np.ones(len(y), dtype=np.float64)
+    for i, (label, sev) in enumerate(zip(y, stenosis)):
+        if label == 1:
+            sev_int = int(sev) if not (isinstance(sev, float) and np.isnan(sev)) else 1
+            weights[i] = base_pos * SEVERITY_MULTIPLIER.get(sev_int, 1.0)
+    return weights
+
+
+def binary_metrics(y_true, y_pred, y_prob, prefix: str) -> dict:
+    metrics: dict = {f"{prefix}_acc": accuracy_score(y_true, y_pred)}
+    metrics[f"{prefix}_bal_acc"] = balanced_accuracy_score(y_true, y_pred)
+    metrics[f"{prefix}_f1"] = f1_score(y_true, y_pred, zero_division=0)
+    metrics[f"{prefix}_prec"] = precision_score(y_true, y_pred, zero_division=0)
+    metrics[f"{prefix}_rec"] = recall_score(y_true, y_pred, zero_division=0)
+    if y_prob is not None and len(np.unique(y_true)) > 1:
+        metrics[f"{prefix}_auc_roc"] = roc_auc_score(y_true, y_prob)
+        metrics[f"{prefix}_auc_pr"] = average_precision_score(y_true, y_prob)
+    else:
+        metrics[f"{prefix}_auc_roc"] = float("nan")
+        metrics[f"{prefix}_auc_pr"] = float("nan")
+    return metrics
 
 
 def load_results_json(path: Path) -> dict:
