@@ -831,7 +831,7 @@ def main():
     parser.add_argument("--excluded", type=Path, default=Path("configs/excluded_samples.json"))
     parser.add_argument("--annotations", type=Path, default=Path("outputs/annotations/annotations.json"))
     parser.add_argument("--masks-dir", type=Path, default=Path("outputs/annotations/masks"))
-    parser.add_argument("--npy-dir", type=Path, default=None, help="Directory with pre-converted NPY temperature files")
+    parser.add_argument("--npy-dir", type=Path, default=Path("datasets/npy_temperature"), help="Directory with pre-converted NPY temperature files")
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
