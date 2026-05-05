@@ -64,6 +64,7 @@ DEFAULT_TRAINING_ARGS = {
     "early-stop-min-epochs": 8,
     "early-stop-min-delta": 0.001,
     "grad-clip": 1.0,
+    "selection-metric": "f1",
     "severity-beta": 0.25,
     "seed": 42,
 }

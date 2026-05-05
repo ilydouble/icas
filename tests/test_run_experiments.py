@@ -22,6 +22,11 @@ class BuildCommandTests(unittest.TestCase):
         self.assertIn("--device", cmd)
         self.assertIn("cuda:1", cmd)
 
+    def test_build_command_defaults_to_sample_level_selection(self):
+        cmd = build_command({"model": "mobilenet"})
+        idx = cmd.index("--selection-metric")
+        self.assertEqual(cmd[idx + 1], "f1")
+
 
 class ParseArgsTests(unittest.TestCase):
     def test_parse_args_accepts_batch_size_and_device(self):

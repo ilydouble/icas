@@ -1026,7 +1026,7 @@ def main():
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4, help="Minimum AUC gain to reset patience")
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze MobileNet features for the first N epochs")
     parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"], help="Validation metric used to choose the classification threshold")
-    parser.add_argument("--selection-metric", type=str, default="auc_roc", choices=["auc_roc", "f1", "patient_auc_roc", "patient_f1"], help="Validation metric used to select the best checkpoint")
+    parser.add_argument("--selection-metric", type=str, default="f1", choices=["auc_roc", "f1", "patient_auc_roc", "patient_f1"], help="Validation metric used to select the best checkpoint")
     parser.add_argument("--patient-aggregation", type=str, default="mean", choices=["mean", "max", "top2_mean"], help="How to combine multiple samples from the same patient")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
