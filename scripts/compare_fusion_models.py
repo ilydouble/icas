@@ -37,7 +37,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.compare_models import (
     FEATURE_META_COLS,
-    _fit,
     binary_metrics,
     compute_severity_weights,
     model_configs,
@@ -89,6 +88,16 @@ def build_feature_sets(deep_cols: list[str], clinical_cols: list[str]) -> dict[s
         "clinical_only": clinical_cols,
         "fusion": deep_cols + clinical_cols,
     }
+
+
+def normalize_feature_set_names(spec: str | None, available: list[str]) -> list[str]:
+    if not spec:
+        return available
+    wanted = [item.strip() for item in spec.split(",") if item.strip()]
+    unknown = [name for name in wanted if name not in available]
+    if unknown:
+        raise ValueError(f"Unknown feature set(s): {', '.join(unknown)}")
+    return wanted
 
 
 def load_results_json(path: Path) -> dict:
@@ -237,6 +246,7 @@ def run_feature_set_comparison(
     y_te,
     do_search: bool,
     cv_folds: int,
+    n_jobs: int,
 ) -> list[dict]:
     rows: list[dict] = []
     for strategy in ("standard", "severity_weighted"):
@@ -244,13 +254,14 @@ def run_feature_set_comparison(
             continue
         pipe = cfg["pipeline"] if strategy == "standard" else cfg["pipeline_sw"]
         sw = None if strategy == "standard" else compute_severity_weights(y_tr, sev_tr)
-        best, best_params, cv_auc = _fit(
+        best, best_params, cv_auc = fit_model(
             pipe,
             X_tr,
             y_tr,
             cfg["param_grid"],
             do_search,
             cv_folds,
+            n_jobs,
             sample_weight=sw,
             groups=groups_tr,
         )
@@ -267,6 +278,44 @@ def run_feature_set_comparison(
     return rows
 
 
+def fit_model(
+    pipe,
+    X_tr,
+    y_tr,
+    param_grid: dict,
+    do_search: bool,
+    cv_folds: int,
+    n_jobs: int,
+    sample_weight=None,
+    groups=None,
+):
+    """Local fit wrapper so this script can control sklearn parallelism."""
+    from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold
+
+    fit_kwargs = {}
+    if sample_weight is not None:
+        fit_kwargs["clf__sample_weight"] = sample_weight
+
+    if do_search:
+        if groups is not None:
+            cv = StratifiedGroupKFold(n_splits=cv_folds)
+        else:
+            cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        gs = GridSearchCV(
+            pipe,
+            param_grid,
+            scoring="roc_auc",
+            cv=cv,
+            n_jobs=n_jobs,
+            refit=True,
+        )
+        gs.fit(X_tr, y_tr, groups=groups, **fit_kwargs)
+        return gs.best_estimator_, gs.best_params_, float(gs.best_score_)
+
+    pipe.fit(X_tr, y_tr, **fit_kwargs)
+    return pipe, {}, float("nan")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-json", type=Path, required=True, help="Training results JSON describing the best CNN architecture")
@@ -280,6 +329,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--npy-dir", type=Path, default=Path("datasets/npy_temperature"))
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--n-jobs", type=int, default=1, help="Parallel jobs for GridSearchCV; use 1 on local macOS for stability")
+    parser.add_argument("--feature-sets", type=str, help="Comma-separated subset of feature sets: deep_only,clinical_only,fusion")
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--feature-csv", type=Path, help="Optional path to save extracted deep+clinical features")
     parser.add_argument("--no-search", action="store_true", help="Skip GridSearchCV for a faster comparison")
@@ -329,10 +380,12 @@ def main() -> None:
 
     deep_cols = [c for c in fusion_df.columns if c.startswith("deep_")] + ["cnn_prob", "cnn_severity_pred"]
     feature_sets = build_feature_sets(deep_cols, clinical_cols)
+    selected_feature_sets = normalize_feature_set_names(args.feature_sets, list(feature_sets.keys()))
     split = json.loads(args.split.read_text(encoding="utf-8"))
 
     rows: list[dict] = []
-    for feature_set_name, feature_cols in feature_sets.items():
+    for feature_set_name in selected_feature_sets:
+        feature_cols = feature_sets[feature_set_name]
         X_tr, y_tr, sev_tr, groups_tr, X_va, y_va, X_te, y_te = apply_split_feature_set(
             fusion_df, split, feature_cols
         )
@@ -351,6 +404,7 @@ def main() -> None:
                     y_te,
                     do_search=not args.no_search,
                     cv_folds=args.cv_folds,
+                    n_jobs=args.n_jobs,
                 )
             )
 
