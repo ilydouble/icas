@@ -81,8 +81,10 @@ QUICK_EXPERIMENTS = [
 ]
 
 
-def build_command(params: dict) -> list[str]:
+def build_command(params: dict, npy_dir: str | None = None) -> list[str]:
     cmd = [sys.executable, "scripts/train_cnn_v2.py"]
+    if npy_dir:
+        cmd.extend(["--npy-dir", npy_dir])
     for key, value in params.items():
         if isinstance(value, bool) and value:
             cmd.append(f"--{key}")
@@ -91,8 +93,8 @@ def build_command(params: dict) -> list[str]:
     return cmd
 
 
-def run_experiment(exp_id: int, params: dict, output_dir: Path) -> dict:
-    cmd = build_command(params)
+def run_experiment(exp_id: int, params: dict, output_dir: Path, npy_dir: str | None = None) -> dict:
+    cmd = build_command(params, npy_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_name = f"exp_{exp_id:03d}_{timestamp}"
     log_file = output_dir / f"{exp_name}.log"
@@ -156,11 +158,18 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Run only key experiments")
     parser.add_argument("--output-dir", type=Path, default=Path("reports/experiments"))
     parser.add_argument("--start-from", type=int, default=1, help="Start from experiment ID")
+    parser.add_argument("--npy-dir", type=str, default="datasets/npy_temperature", help="NPY cache directory")
     args = parser.parse_args()
 
     experiments = QUICK_EXPERIMENTS if args.quick else EXPERIMENTS
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    npy_dir = args.npy_dir if Path(args.npy_dir).exists() else None
+    if npy_dir:
+        print(f"Using NPY cache: {npy_dir}")
+    else:
+        print("NPY cache not found, using CSV (slower)")
 
     print(f"Total experiments: {len(experiments)}")
     print(f"Output directory: {output_dir}")
@@ -171,7 +180,7 @@ def main():
         if i < args.start_from:
             print(f"Skipping experiment {i}")
             continue
-        result = run_experiment(i, params, output_dir)
+        result = run_experiment(i, params, output_dir, npy_dir)
         all_results.append(result)
 
         summary_path = output_dir / "experiment_summary.json"

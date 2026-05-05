@@ -369,6 +369,7 @@ class TemperatureDataset(Dataset):
         use_mask: bool = True,
         augment: bool = False,
         region_attention: bool = False,
+        npy_dir: Path | None = None,
     ):
         self.samples = samples
         self.annotations = annotations
@@ -380,6 +381,7 @@ class TemperatureDataset(Dataset):
         self.use_mask = use_mask
         self.augment = augment
         self.region_attention = region_attention
+        self.npy_dir = npy_dir
         self.augmentation = TemperatureAugmentation() if augment else None
         self._temp_cache: dict[str, np.ndarray] = {}
         self._mask_cache: dict[str, np.ndarray] = {}
@@ -408,11 +410,24 @@ class TemperatureDataset(Dataset):
         sample = self.samples[idx]
         sample_id = sample["sample_id"]
         patient_id = sample["canonical_patient_id"]
-        temp_path = self.repo_root / sample["temperature_path"]
 
         if sample_id in self._temp_cache:
             temp_matrix = self._temp_cache[sample_id]
+        elif self.npy_dir is not None:
+            npy_path = self.npy_dir / f"{sample_id}.npy"
+            if npy_path.exists():
+                temp_matrix = np.load(npy_path)
+                self._temp_cache[sample_id] = temp_matrix
+            else:
+                temp_path = self.repo_root / sample["temperature_path"]
+                try:
+                    temp_matrix = parse_temperature_csv(temp_path)
+                    self._temp_cache[sample_id] = temp_matrix
+                except Exception as e:
+                    print(f"Warning: Failed to load {sample_id}: {e}")
+                    temp_matrix = np.zeros((1024, 1280), dtype=np.float32)
         else:
+            temp_path = self.repo_root / sample["temperature_path"]
             try:
                 temp_matrix = parse_temperature_csv(temp_path)
                 self._temp_cache[sample_id] = temp_matrix
@@ -816,6 +831,7 @@ def main():
     parser.add_argument("--excluded", type=Path, default=Path("configs/excluded_samples.json"))
     parser.add_argument("--annotations", type=Path, default=Path("outputs/annotations/annotations.json"))
     parser.add_argument("--masks-dir", type=Path, default=Path("outputs/annotations/masks"))
+    parser.add_argument("--npy-dir", type=Path, default=None, help="Directory with pre-converted NPY temperature files")
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -862,21 +878,25 @@ def main():
 
     target_size = (args.target_size, args.target_size)
     use_mask = not args.no_mask
+    npy_dir = args.npy_dir
+
+    if npy_dir and npy_dir.exists():
+        print(f"Using NPY cache: {npy_dir}")
 
     train_dataset = TemperatureDataset(
         data["train"], data["annotations"], data["labels"], data["severities"],
         repo_root, args.masks_dir, target_size, use_mask=use_mask, augment=args.augment,
-        region_attention=args.region_attention,
+        region_attention=args.region_attention, npy_dir=npy_dir,
     )
     val_dataset = TemperatureDataset(
         data["val"], data["annotations"], data["labels"], data["severities"],
         repo_root, args.masks_dir, target_size, use_mask=use_mask,
-        region_attention=args.region_attention,
+        region_attention=args.region_attention, npy_dir=npy_dir,
     )
     test_dataset = TemperatureDataset(
         data["test"], data["annotations"], data["labels"], data["severities"],
         repo_root, args.masks_dir, target_size, use_mask=use_mask,
-        region_attention=args.region_attention,
+        region_attention=args.region_attention, npy_dir=npy_dir,
     )
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
