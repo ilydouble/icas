@@ -862,13 +862,19 @@ def find_best_threshold(
     return float(best_threshold), best_metrics
 
 
+def compute_selection_score(metrics: dict[str, float], metric_name: str) -> float:
+    """Read the metric used to select the best checkpoint."""
+    return float(metrics.get(metric_name, float("-inf")))
+
+
 def aggregate_patient_predictions(
     sample_ids: list[str],
     y_true: np.ndarray,
     y_prob: np.ndarray,
     sample_to_patient: dict[str, str],
+    method: str = "mean",
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """Aggregate sample-level predictions into patient-level mean scores."""
+    """Aggregate sample-level predictions into patient-level scores."""
     patient_order: list[str] = []
     patient_prob_buckets: dict[str, list[float]] = {}
     patient_labels: dict[str, int] = {}
@@ -882,10 +888,17 @@ def aggregate_patient_predictions(
         patient_prob_buckets[patient_id].append(float(prob))
 
     labels = np.array([patient_labels[pid] for pid in patient_order], dtype=np.int64)
-    probs = np.array(
-        [float(np.mean(patient_prob_buckets[pid])) for pid in patient_order],
-        dtype=np.float32,
-    )
+    def _reduce(values: list[float]) -> float:
+        if method == "mean":
+            return float(np.mean(values))
+        if method == "max":
+            return float(np.max(values))
+        if method == "top2_mean":
+            topk = sorted(values, reverse=True)[:2]
+            return float(np.mean(topk))
+        raise ValueError(f"Unsupported patient aggregation method: {method}")
+
+    probs = np.array([_reduce(patient_prob_buckets[pid]) for pid in patient_order], dtype=np.float32)
     return patient_order, labels, probs
 
 
@@ -960,6 +973,26 @@ def evaluate(
     return metrics, all_ids, labels, probs
 
 
+def build_patient_metrics(
+    sample_ids: list[str],
+    labels: np.ndarray,
+    probs: np.ndarray,
+    sample_to_patient: dict[str, str],
+    threshold: float,
+    aggregation_method: str,
+) -> tuple[dict, np.ndarray, np.ndarray]:
+    _, patient_labels, patient_probs = aggregate_patient_predictions(
+        sample_ids,
+        labels,
+        probs,
+        sample_to_patient,
+        method=aggregation_method,
+    )
+    patient_preds = (patient_probs >= threshold).astype(int)
+    metrics = compute_metrics(patient_labels, patient_preds, patient_probs)
+    return metrics, patient_labels, patient_probs
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=Path("datasets/full_data/manifest.csv"))
@@ -993,6 +1026,8 @@ def main():
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4, help="Minimum AUC gain to reset patience")
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze MobileNet features for the first N epochs")
     parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"], help="Validation metric used to choose the classification threshold")
+    parser.add_argument("--selection-metric", type=str, default="auc_roc", choices=["auc_roc", "f1", "patient_auc_roc", "patient_f1"], help="Validation metric used to select the best checkpoint")
+    parser.add_argument("--patient-aggregation", type=str, default="mean", choices=["mean", "max", "top2_mean"], help="How to combine multiple samples from the same patient")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -1013,6 +1048,8 @@ def main():
     print(f"Use soft labels: {args.soft_label}")
     print(f"Model: {args.model}")
     print(f"Seed: {args.seed}")
+    print(f"Selection metric: {args.selection_metric}")
+    print(f"Patient aggregation: {args.patient_aggregation}")
     if args.model == "mobilenet":
         print(f"Use pretrained: {not args.no_pretrained}")
         print(f"Freeze backbone epochs: {args.freeze_backbone_epochs}")
@@ -1113,7 +1150,12 @@ def main():
         min_delta=args.early_stop_min_delta,
     )
 
-    best_val_auc = 0.0
+    sample_to_patient = {
+        sample["sample_id"]: sample["canonical_patient_id"]
+        for sample in (data["val"] + data["test"])
+    }
+
+    best_selection_score = float("-inf")
     best_epoch = 0
     history: list[dict] = []
     backbone_trainable = True
@@ -1140,22 +1182,43 @@ def main():
             multi_task=multi_task,
             grad_clip=args.grad_clip,
         )
-        val_metrics, _, _, _ = evaluate(model, val_loader, device, multi_task=multi_task, soft_label=soft_label)
+        val_metrics, val_ids, val_labels, val_probs = evaluate(
+            model, val_loader, device, multi_task=multi_task, soft_label=soft_label
+        )
+        val_patient_metrics, _, _ = build_patient_metrics(
+            val_ids,
+            val_labels,
+            val_probs,
+            sample_to_patient,
+            threshold=0.5,
+            aggregation_method=args.patient_aggregation,
+        )
         scheduler.step()
+
+        selection_metrics = dict(val_metrics)
+        selection_metrics["patient_auc_roc"] = val_patient_metrics["auc_roc"]
+        selection_metrics["patient_f1"] = val_patient_metrics["f1"]
+        selection_score = compute_selection_score(selection_metrics, args.selection_metric)
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
             **{f"val_{k}": v for k, v in val_metrics.items()},
+            "val_patient_auc_roc": val_patient_metrics["auc_roc"],
+            "val_patient_f1": val_patient_metrics["f1"],
+            "selection_score": selection_score,
         })
 
-        if val_metrics["auc_roc"] > best_val_auc:
-            best_val_auc = val_metrics["auc_roc"]
+        if selection_score > best_selection_score:
+            best_selection_score = selection_score
             best_epoch = epoch
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
-                "val_auc": best_val_auc,
+                "selection_metric": args.selection_metric,
+                "selection_score": best_selection_score,
+                "val_auc": val_metrics["auc_roc"],
+                "val_patient_auc": val_patient_metrics["auc_roc"],
             }, args.output / "best_cnn_v2.pt")
 
         if epoch % 10 == 0 or epoch == args.epochs:
@@ -1167,7 +1230,7 @@ def main():
             print(f"Early stopping at epoch {epoch}: no val_auc improvement for {args.early_stop_patience} epochs.")
             break
 
-    print(f"\nBest validation AUC: {best_val_auc:.4f} at epoch {best_epoch}")
+    print(f"\nBest validation {args.selection_metric}: {best_selection_score:.4f} at epoch {best_epoch}")
 
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -1186,21 +1249,19 @@ def main():
     test_threshold_metrics["threshold"] = best_threshold
     test_threshold_metrics["optimized_metric"] = args.threshold_metric
 
-    sample_to_patient = {
-        sample["sample_id"]: sample["canonical_patient_id"]
-        for sample in (data["val"] + data["test"])
-    }
     _, val_patient_labels, val_patient_probs = aggregate_patient_predictions(
         val_ids,
         val_labels,
         val_probs,
         sample_to_patient,
+        method=args.patient_aggregation,
     )
     _, test_patient_labels, test_patient_probs = aggregate_patient_predictions(
         test_ids,
         test_labels,
         test_probs,
         sample_to_patient,
+        method=args.patient_aggregation,
     )
     patient_default_preds = (test_patient_probs >= 0.5).astype(int)
     patient_metrics = compute_metrics(
@@ -1266,6 +1327,8 @@ def main():
         "early_stop_min_epochs": args.early_stop_min_epochs,
         "freeze_backbone_epochs": args.freeze_backbone_epochs if args.model == "mobilenet" else 0,
         "threshold_metric": args.threshold_metric,
+        "selection_metric": args.selection_metric,
+        "patient_aggregation": args.patient_aggregation,
         "batch_size": args.batch_size,
         "test_metrics": test_metrics,
         "val_threshold_metrics": val_threshold_metrics,
