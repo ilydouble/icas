@@ -8,9 +8,9 @@ It searches regularization and optimization knobs that are more likely to
 matter on this dataset than broad architecture sweeps.
 
 Usage:
-    python scripts/run_experiments.py
-    python scripts/run_experiments.py --preset champion --start-from 5
-    python scripts/run_experiments.py --preset legacy
+    python scripts/run_local_search.py
+    python scripts/run_local_search.py --preset champion --start-from 5
+    python scripts/run_local_search.py --preset legacy
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def build_command(
     batch_size: int | None = None,
     device: str | None = None,
 ) -> list[str]:
-    cmd = [sys.executable, "scripts/train_cnn_v2.py"]
+    cmd = [sys.executable, "scripts/train_cnn_v3.py"]
     if npy_dir:
         cmd.extend(["--npy-dir", npy_dir])
 
@@ -139,7 +139,7 @@ def run_experiment(
             result["status"] = "failed"
             print(f"  FAILED with return code {proc.returncode}")
         else:
-            results_files = sorted(output_dir.parent.glob("cnn_v2_results_*.json"), reverse=True)
+            results_files = sorted(output_dir.parent.glob("cnn_v3_results_*.json"), reverse=True)
             if results_files:
                 with results_files[0].open(encoding="utf-8") as f:
                     train_result = json.load(f)

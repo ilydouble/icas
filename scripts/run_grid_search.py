@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Coarse mixed grid search for CNN method selection.
 
-This script is intentionally broader than `scripts/run_experiments.py`.
+This script is intentionally broader than `scripts/run_local_search.py`.
 Use it first to determine the rough winning recipe:
 
 - which backbone family is worth keeping,
@@ -12,7 +12,7 @@ Use it first to determine the rough winning recipe:
 - and which coarse hyperparameter profile looks promising.
 
 After a promising family is identified, switch to
-`scripts/run_experiments.py` for local refinement.
+`scripts/run_local_search.py` for local refinement.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from scripts.run_experiments import DEFAULT_TRAINING_ARGS, build_command
+from scripts.run_local_search import DEFAULT_TRAINING_ARGS, build_command
 
 
 METHOD_VARIANTS = [
@@ -168,7 +168,7 @@ def generate_experiments(preset: str) -> list[dict]:
 
 
 def _result_files(results_dir: Path) -> list[Path]:
-    return sorted(results_dir.glob("cnn_v2_results_*.json"))
+    return sorted(results_dir.glob("cnn_v3_results_*.json"))
 
 
 def run_search_experiment(

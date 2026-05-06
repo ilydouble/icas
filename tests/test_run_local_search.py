@@ -1,10 +1,10 @@
-"""Unit tests for run_experiments helpers."""
+"""Unit tests for run_local_search helpers."""
 
 from __future__ import annotations
 
 import unittest
 
-from scripts.run_experiments import build_command, parse_args
+from scripts.run_local_search import build_command, parse_args
 
 
 class BuildCommandTests(unittest.TestCase):

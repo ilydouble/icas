@@ -146,7 +146,7 @@ python scripts/train_cnn_v2.py \
 
 ## Coarse CNN Grid Search
 
-Before running `scripts/run_experiments.py` for local refinement, use the coarse
+Before running `scripts/run_local_search.py` for local refinement, use the coarse
 mixed grid search to decide the rough winning recipe across method switches and
 representative hyperparameter profiles.
 
@@ -181,4 +181,4 @@ It writes logs and summaries under:
 - `reports/grid_search/grid_search_summary.json`
 
 Use this stage to choose the approximate winning family, then switch to
-`python scripts/run_experiments.py` for finer local search around that family.
+`python scripts/run_local_search.py` for finer local search around that family.
