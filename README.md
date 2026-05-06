@@ -143,3 +143,42 @@ python scripts/train_cnn_v2.py \
   --multi-task \
   --lambda-sev 0.3
 ```
+
+## Coarse CNN Grid Search
+
+Before running `scripts/run_experiments.py` for local refinement, use the coarse
+mixed grid search to decide the rough winning recipe across method switches and
+representative hyperparameter profiles.
+
+Recommended command:
+
+```bash
+python scripts/run_grid_search.py --preset coarse
+```
+
+Useful variants:
+
+```bash
+python scripts/run_grid_search.py --preset quick --dry-run
+python scripts/run_grid_search.py --preset coarse --start-from 10
+python scripts/run_grid_search.py --preset coarse --limit 12 --device cuda
+```
+
+The coarse preset currently runs **33 experiments** and is designed to compare
+whether to keep or drop:
+
+- `region-attention`
+- `multi-task`
+- `augment`
+- `pretrained`
+- `face mask`
+- `severity weighting`
+- coarse backbone choice (`mobilenet`, `simple`, `deeper`)
+
+It writes logs and summaries under:
+
+- `reports/grid_search/grid_plan.json`
+- `reports/grid_search/grid_search_summary.json`
+
+Use this stage to choose the approximate winning family, then switch to
+`python scripts/run_experiments.py` for finer local search around that family.
