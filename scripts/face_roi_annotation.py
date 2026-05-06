@@ -145,7 +145,7 @@ def segment_face(image: np.ndarray, model: YOLO, conf_threshold: float = 0.25) -
         polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
     
     bbox_xyxy = box.xyxy[0].cpu().numpy().tolist()
-    confidence = float(box.conf.cpu().numpy())
+    confidence = float(box.conf.item())
     
     # Calculate area
     area = cv2.contourArea(np.array(polygon, dtype=np.float32))
@@ -250,7 +250,7 @@ def segment_facial_regions(
     for i in range(len(result.masks)):
         box = result.boxes[i]
         mask = result.masks[i]
-        cls_id = int(box.cls.cpu().numpy())
+        cls_id = int(box.cls.item())
         cls_name = result.names[cls_id]
 
         # Extract polygon
@@ -261,7 +261,7 @@ def segment_facial_regions(
             polygon = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
         bbox_xyxy = box.xyxy[0].cpu().numpy().tolist()
-        confidence = float(box.conf.cpu().numpy())
+        confidence = float(box.conf.item())
 
         # Calculate centroid
         polygon_arr = np.array(polygon, dtype=np.float32)
