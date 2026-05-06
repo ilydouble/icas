@@ -92,6 +92,11 @@ Its sample-level test metrics were:
 - `AUC-PR = 0.5386`
 - `F1 = 0.5352`
 
+The current local experiment runner now keeps the same champion ranking target:
+
+- best checkpoint selection defaults to `selection-metric=auc_roc`
+- experiment summaries stay ranked by `test_auc_roc`
+
 To rerun that configuration directly:
 
 ```bash
@@ -102,6 +107,7 @@ python scripts/train_cnn_v2.py \
   --lr 0.001 \
   --dropout 0.3 \
   --target-size 64 \
+  --selection-metric auc_roc \
   --region-attention \
   --multi-task \
   --lambda-sev 0.3
