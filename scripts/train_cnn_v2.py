@@ -867,41 +867,6 @@ def compute_selection_score(metrics: dict[str, float], metric_name: str) -> floa
     return float(metrics.get(metric_name, float("-inf")))
 
 
-def aggregate_patient_predictions(
-    sample_ids: list[str],
-    y_true: np.ndarray,
-    y_prob: np.ndarray,
-    sample_to_patient: dict[str, str],
-    method: str = "mean",
-) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """Aggregate sample-level predictions into patient-level scores."""
-    patient_order: list[str] = []
-    patient_prob_buckets: dict[str, list[float]] = {}
-    patient_labels: dict[str, int] = {}
-
-    for sample_id, label, prob in zip(sample_ids, y_true, y_prob):
-        patient_id = sample_to_patient[sample_id]
-        if patient_id not in patient_prob_buckets:
-            patient_order.append(patient_id)
-            patient_prob_buckets[patient_id] = []
-            patient_labels[patient_id] = int(label)
-        patient_prob_buckets[patient_id].append(float(prob))
-
-    labels = np.array([patient_labels[pid] for pid in patient_order], dtype=np.int64)
-    def _reduce(values: list[float]) -> float:
-        if method == "mean":
-            return float(np.mean(values))
-        if method == "max":
-            return float(np.max(values))
-        if method == "top2_mean":
-            topk = sorted(values, reverse=True)[:2]
-            return float(np.mean(topk))
-        raise ValueError(f"Unsupported patient aggregation method: {method}")
-
-    probs = np.array([_reduce(patient_prob_buckets[pid]) for pid in patient_order], dtype=np.float32)
-    return patient_order, labels, probs
-
-
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -973,26 +938,6 @@ def evaluate(
     return metrics, all_ids, labels, probs
 
 
-def build_patient_metrics(
-    sample_ids: list[str],
-    labels: np.ndarray,
-    probs: np.ndarray,
-    sample_to_patient: dict[str, str],
-    threshold: float,
-    aggregation_method: str,
-) -> tuple[dict, np.ndarray, np.ndarray]:
-    _, patient_labels, patient_probs = aggregate_patient_predictions(
-        sample_ids,
-        labels,
-        probs,
-        sample_to_patient,
-        method=aggregation_method,
-    )
-    patient_preds = (patient_probs >= threshold).astype(int)
-    metrics = compute_metrics(patient_labels, patient_preds, patient_probs)
-    return metrics, patient_labels, patient_probs
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=Path("datasets/full_data/manifest.csv"))
@@ -1026,8 +971,7 @@ def main():
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4, help="Minimum AUC gain to reset patience")
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0, help="Freeze MobileNet features for the first N epochs")
     parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"], help="Validation metric used to choose the classification threshold")
-    parser.add_argument("--selection-metric", type=str, default="f1", choices=["auc_roc", "f1", "patient_auc_roc", "patient_f1"], help="Validation metric used to select the best checkpoint")
-    parser.add_argument("--patient-aggregation", type=str, default="mean", choices=["mean", "max", "top2_mean"], help="How to combine multiple samples from the same patient")
+    parser.add_argument("--selection-metric", type=str, default="f1", choices=["auc_roc", "f1"], help="Validation metric used to select the best checkpoint")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -1049,7 +993,6 @@ def main():
     print(f"Model: {args.model}")
     print(f"Seed: {args.seed}")
     print(f"Selection metric: {args.selection_metric}")
-    print(f"Patient aggregation: {args.patient_aggregation}")
     if args.model == "mobilenet":
         print(f"Use pretrained: {not args.no_pretrained}")
         print(f"Freeze backbone epochs: {args.freeze_backbone_epochs}")
@@ -1150,11 +1093,6 @@ def main():
         min_delta=args.early_stop_min_delta,
     )
 
-    sample_to_patient = {
-        sample["sample_id"]: sample["canonical_patient_id"]
-        for sample in (data["val"] + data["test"])
-    }
-
     best_selection_score = float("-inf")
     best_epoch = 0
     history: list[dict] = []
@@ -1185,27 +1123,14 @@ def main():
         val_metrics, val_ids, val_labels, val_probs = evaluate(
             model, val_loader, device, multi_task=multi_task, soft_label=soft_label
         )
-        val_patient_metrics, _, _ = build_patient_metrics(
-            val_ids,
-            val_labels,
-            val_probs,
-            sample_to_patient,
-            threshold=0.5,
-            aggregation_method=args.patient_aggregation,
-        )
         scheduler.step()
 
-        selection_metrics = dict(val_metrics)
-        selection_metrics["patient_auc_roc"] = val_patient_metrics["auc_roc"]
-        selection_metrics["patient_f1"] = val_patient_metrics["f1"]
-        selection_score = compute_selection_score(selection_metrics, args.selection_metric)
+        selection_score = compute_selection_score(val_metrics, args.selection_metric)
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
             **{f"val_{k}": v for k, v in val_metrics.items()},
-            "val_patient_auc_roc": val_patient_metrics["auc_roc"],
-            "val_patient_f1": val_patient_metrics["f1"],
             "selection_score": selection_score,
         })
 
@@ -1218,7 +1143,6 @@ def main():
                 "selection_metric": args.selection_metric,
                 "selection_score": best_selection_score,
                 "val_auc": val_metrics["auc_roc"],
-                "val_patient_auc": val_patient_metrics["auc_roc"],
             }, args.output / "best_cnn_v2.pt")
 
         if epoch % 10 == 0 or epoch == args.epochs:
@@ -1235,53 +1159,19 @@ def main():
     checkpoint = torch.load(args.output / "best_cnn_v2.pt", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    val_metrics, val_ids, val_labels, val_probs = evaluate(
+    val_metrics, _, val_labels, val_probs = evaluate(
         model, val_loader, device, multi_task=multi_task, soft_label=soft_label
     )
     best_threshold, val_threshold_metrics = find_best_threshold(
         val_labels, val_probs, metric=args.threshold_metric
     )
-    test_metrics, test_ids, test_labels, test_probs = evaluate(
+    test_metrics, _, test_labels, test_probs = evaluate(
         model, test_loader, device, multi_task=multi_task, soft_label=soft_label
     )
     test_threshold_preds = (test_probs >= best_threshold).astype(int)
     test_threshold_metrics = compute_metrics(test_labels, test_threshold_preds, test_probs)
     test_threshold_metrics["threshold"] = best_threshold
     test_threshold_metrics["optimized_metric"] = args.threshold_metric
-
-    _, val_patient_labels, val_patient_probs = aggregate_patient_predictions(
-        val_ids,
-        val_labels,
-        val_probs,
-        sample_to_patient,
-        method=args.patient_aggregation,
-    )
-    _, test_patient_labels, test_patient_probs = aggregate_patient_predictions(
-        test_ids,
-        test_labels,
-        test_probs,
-        sample_to_patient,
-        method=args.patient_aggregation,
-    )
-    patient_default_preds = (test_patient_probs >= 0.5).astype(int)
-    patient_metrics = compute_metrics(
-        test_patient_labels,
-        patient_default_preds,
-        test_patient_probs,
-    )
-    patient_threshold, val_patient_threshold_metrics = find_best_threshold(
-        val_patient_labels,
-        val_patient_probs,
-        metric=args.threshold_metric,
-    )
-    patient_threshold_preds = (test_patient_probs >= patient_threshold).astype(int)
-    patient_threshold_metrics = compute_metrics(
-        test_patient_labels,
-        patient_threshold_preds,
-        test_patient_probs,
-    )
-    patient_threshold_metrics["threshold"] = patient_threshold
-    patient_threshold_metrics["optimized_metric"] = args.threshold_metric
 
     print(f"\n{'='*50}")
     print("Test Results")
@@ -1290,15 +1180,6 @@ def main():
         print(f"  {k}: {v:.4f}")
     print("Threshold-tuned Test Results")
     for k, v in test_threshold_metrics.items():
-        if isinstance(v, float):
-            print(f"  {k}: {v:.4f}")
-        else:
-            print(f"  {k}: {v}")
-    print("Patient-level Test Results")
-    for k, v in patient_metrics.items():
-        print(f"  {k}: {v:.4f}")
-    print("Patient-level Threshold-tuned Test Results")
-    for k, v in patient_threshold_metrics.items():
         if isinstance(v, float):
             print(f"  {k}: {v:.4f}")
         else:
@@ -1328,14 +1209,10 @@ def main():
         "freeze_backbone_epochs": args.freeze_backbone_epochs if args.model == "mobilenet" else 0,
         "threshold_metric": args.threshold_metric,
         "selection_metric": args.selection_metric,
-        "patient_aggregation": args.patient_aggregation,
         "batch_size": args.batch_size,
         "test_metrics": test_metrics,
         "val_threshold_metrics": val_threshold_metrics,
         "test_threshold_metrics": test_threshold_metrics,
-        "patient_test_metrics": patient_metrics,
-        "val_patient_threshold_metrics": val_patient_threshold_metrics,
-        "patient_test_threshold_metrics": patient_threshold_metrics,
     }
 
     results_path = args.output / f"cnn_v2_results_{timestamp}.json"
