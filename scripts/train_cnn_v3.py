@@ -54,10 +54,117 @@ warnings.filterwarnings("ignore")
 SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 1.5, 3: 2.0}
 AUGMENTATION_STRATEGIES = [
     "baseline",
+    "mild_baseline",
+    "mild_no_flip",
     "face_cutout",
     "attention_guided_cutout",
     "attention_guided_mixed",
+    "tiny_face_cutout",
+    "tiny_attention_guided_cutout",
 ]
+
+
+def get_augmentation_strategy_config(strategy: str) -> dict:
+    """Return augmentation hyperparameters for a named strategy."""
+    configs = {
+        "baseline": {
+            "strategy": "baseline",
+            "temp_offset_range": (-1.0, 1.0),
+            "temp_scale_range": (0.95, 1.05),
+            "noise_std": 0.02,
+            "rotation_range": 5.0,
+            "translation_range": 5,
+            "p_flip": 0.5,
+            "cutout_prob": 0.5,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "mild_baseline": {
+            "strategy": "baseline",
+            "temp_offset_range": (-0.3, 0.3),
+            "temp_scale_range": (0.98, 1.02),
+            "noise_std": 0.008,
+            "rotation_range": 2.0,
+            "translation_range": 2,
+            "p_flip": 0.2,
+            "cutout_prob": 0.0,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "mild_no_flip": {
+            "strategy": "baseline",
+            "temp_offset_range": (-0.3, 0.3),
+            "temp_scale_range": (0.98, 1.02),
+            "noise_std": 0.008,
+            "rotation_range": 2.0,
+            "translation_range": 2,
+            "p_flip": 0.0,
+            "cutout_prob": 0.0,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "face_cutout": {
+            "strategy": "face_cutout",
+            "temp_offset_range": (-1.0, 1.0),
+            "temp_scale_range": (0.95, 1.05),
+            "noise_std": 0.02,
+            "rotation_range": 5.0,
+            "translation_range": 5,
+            "p_flip": 0.5,
+            "cutout_prob": 0.5,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "attention_guided_cutout": {
+            "strategy": "attention_guided_cutout",
+            "temp_offset_range": (-1.0, 1.0),
+            "temp_scale_range": (0.95, 1.05),
+            "noise_std": 0.02,
+            "rotation_range": 5.0,
+            "translation_range": 5,
+            "p_flip": 0.5,
+            "cutout_prob": 0.5,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "attention_guided_mixed": {
+            "strategy": "attention_guided_mixed",
+            "temp_offset_range": (-1.0, 1.0),
+            "temp_scale_range": (0.95, 1.05),
+            "noise_std": 0.02,
+            "rotation_range": 5.0,
+            "translation_range": 5,
+            "p_flip": 0.5,
+            "cutout_prob": 0.5,
+            "cutout_scale_range": (0.12, 0.2),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "tiny_face_cutout": {
+            "strategy": "face_cutout",
+            "temp_offset_range": (-0.3, 0.3),
+            "temp_scale_range": (0.98, 1.02),
+            "noise_std": 0.008,
+            "rotation_range": 2.0,
+            "translation_range": 2,
+            "p_flip": 0.0,
+            "cutout_prob": 0.25,
+            "cutout_scale_range": (0.06, 0.1),
+            "mixed_high_attention_prob": 0.15,
+        },
+        "tiny_attention_guided_cutout": {
+            "strategy": "attention_guided_cutout",
+            "temp_offset_range": (-0.3, 0.3),
+            "temp_scale_range": (0.98, 1.02),
+            "noise_std": 0.008,
+            "rotation_range": 2.0,
+            "translation_range": 2,
+            "p_flip": 0.0,
+            "cutout_prob": 0.25,
+            "cutout_scale_range": (0.06, 0.1),
+            "mixed_high_attention_prob": 0.15,
+        },
+    }
+    return dict(configs[strategy])
 
 
 def parse_temperature_csv(path: Path) -> np.ndarray:
@@ -227,16 +334,17 @@ class TemperatureAugmentation:
         cutout_scale_range: tuple[float, float] = (0.12, 0.2),
         mixed_high_attention_prob: float = 0.15,
     ):
-        self.strategy = strategy
-        self.temp_offset_range = temp_offset_range
-        self.temp_scale_range = temp_scale_range
-        self.noise_std = noise_std
-        self.rotation_range = rotation_range
-        self.translation_range = translation_range
-        self.p_flip = p_flip
-        self.cutout_prob = cutout_prob
-        self.cutout_scale_range = cutout_scale_range
-        self.mixed_high_attention_prob = mixed_high_attention_prob
+        config = get_augmentation_strategy_config(strategy)
+        self.strategy = config.pop("strategy")
+        self.temp_offset_range = config.pop("temp_offset_range", temp_offset_range)
+        self.temp_scale_range = config.pop("temp_scale_range", temp_scale_range)
+        self.noise_std = config.pop("noise_std", noise_std)
+        self.rotation_range = config.pop("rotation_range", rotation_range)
+        self.translation_range = config.pop("translation_range", translation_range)
+        self.p_flip = config.pop("p_flip", p_flip)
+        self.cutout_prob = config.pop("cutout_prob", cutout_prob)
+        self.cutout_scale_range = config.pop("cutout_scale_range", cutout_scale_range)
+        self.mixed_high_attention_prob = config.pop("mixed_high_attention_prob", mixed_high_attention_prob)
 
     def __call__(
         self,

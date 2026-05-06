@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from scripts.train_cnn_v3 import build_cutout_candidate_mask
+from scripts.train_cnn_v3 import build_cutout_candidate_mask, get_augmentation_strategy_config
 
 
 class BuildCutoutCandidateMaskTests(unittest.TestCase):
@@ -46,6 +46,19 @@ class BuildCutoutCandidateMaskTests(unittest.TestCase):
             ]
         )
         self.assertTrue(np.array_equal(candidate, expected))
+
+
+class AugmentationConfigTests(unittest.TestCase):
+    def test_mild_no_flip_disables_horizontal_flip(self):
+        config = get_augmentation_strategy_config("mild_no_flip")
+        self.assertEqual(config["p_flip"], 0.0)
+        self.assertLess(config["noise_std"], 0.02)
+
+    def test_tiny_attention_guided_cutout_uses_small_low_prob_cutout(self):
+        config = get_augmentation_strategy_config("tiny_attention_guided_cutout")
+        self.assertEqual(config["strategy"], "attention_guided_cutout")
+        self.assertLess(config["cutout_prob"], 0.5)
+        self.assertEqual(config["cutout_scale_range"], (0.06, 0.1))
 
 
 if __name__ == "__main__":

@@ -53,15 +53,12 @@ BASE_PROFILES = [
 
 AUGMENTATION_VARIANTS = [
     {"name": "no_augment", "params": {}},
-    {"name": "baseline_augment", "params": {"augment": True}},
-    {"name": "face_cutout", "params": {"augment": True, "augmentation-strategy": "face_cutout"}},
+    {"name": "mild_baseline", "params": {"augment": True, "augmentation-strategy": "mild_baseline"}},
+    {"name": "mild_no_flip", "params": {"augment": True, "augmentation-strategy": "mild_no_flip"}},
+    {"name": "tiny_face_cutout", "params": {"augment": True, "augmentation-strategy": "tiny_face_cutout"}},
     {
-        "name": "attention_guided_cutout",
-        "params": {"augment": True, "augmentation-strategy": "attention_guided_cutout"},
-    },
-    {
-        "name": "attention_guided_mixed",
-        "params": {"augment": True, "augmentation-strategy": "attention_guided_mixed"},
+        "name": "tiny_attention_guided_cutout",
+        "params": {"augment": True, "augmentation-strategy": "tiny_attention_guided_cutout"},
     },
 ]
 
