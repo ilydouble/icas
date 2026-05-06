@@ -7,6 +7,7 @@ from scripts.dataset_builder import (
     analyze_sources,
     build_dataset,
     build_full_dataset,
+    load_multimodal_lookup,
     parse_2025_stem,
     parse_sequence_for_patient,
 )
@@ -148,6 +149,48 @@ class DatasetBuilderTests(unittest.TestCase):
                     "CN026": "patient_id",
                 },
             )
+
+    def test_load_multimodal_lookup_extracts_names_from_asr_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            csv_path = root / "multimodal.csv"
+            csv_path.write_text(
+                "patient_id,asr_file\n"
+                "XB001,6362403辛秉太.json | 6362403辛秉太.json\n"
+                "CH046,孔村+3朱士苓.json\n",
+                encoding="utf-8",
+            )
+
+            multimodal_ids, name_to_ids = load_multimodal_lookup(csv_path)
+            self.assertEqual(multimodal_ids, {"XB001", "CH046"})
+            self.assertEqual(name_to_ids["辛秉太"], ["XB001"])
+            self.assertEqual(name_to_ids["朱士苓"], ["CH046"])
+
+    def test_full_dataset_recovers_exact_ocr_variant_patient_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            datasets = root / "datasets"
+            patient_dir = datasets / "2024" / "GCOO5"
+            patient_dir.mkdir(parents=True)
+            (patient_dir / "GCOO51.jpg").write_text("jpg", encoding="utf-8")
+            (patient_dir / "GCOO51.csv").write_text("csv", encoding="utf-8")
+
+            output = root / "full_data"
+            result = build_full_dataset(
+                datasets,
+                output,
+                clinical_ids={"GC005"},
+                multimodal_ids=set(),
+                name_to_clinical_ids={},
+            )
+
+            self.assertEqual(result["included_samples"], 1)
+            self.assertEqual(result["excluded_samples"], 0)
+
+            with (output / "manifest.csv").open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]["canonical_patient_id"], "GC005")
+            self.assertEqual(rows[0]["matched_by"], "patient_id")
 
 
 if __name__ == "__main__":

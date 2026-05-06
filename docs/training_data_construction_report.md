@@ -60,33 +60,33 @@ In the current `full_data` build, all included samples were matched directly by 
 
 The final `full_data` bundle contains:
 
-- **1,423 included image samples**
+- **1,424 included image samples**
 - **538 included patients**
-- **513 samples from 2024**
+- **514 samples from 2024**
 - **910 samples from 2025**
 
 Patient-level image count patterns are highly regular:
 
-- **430 patients** contributed **3 images** each (`1` image from 2024 and `2` frontal images from 2025)
+- **431 patients** contributed **3 images** each (`1` image from 2024 and `2` frontal images from 2025)
 - **83 patients** contributed **1 image** each (`1` image from 2024 only)
-- **25 patients** contributed **2 images** each (`2` frontal images from 2025 only)
+- **24 patients** contributed **2 images** each (`2` frontal images from 2025 only)
 
 Equivalently, the cross-year pattern distribution is:
 
 | Pattern | Patients |
 |---|---:|
-| `2024=1, 2025=2` | 430 |
+| `2024=1, 2025=2` | 431 |
 | `2024=1, 2025=0` | 83 |
-| `2024=0, 2025=2` | 25 |
+| `2024=0, 2025=2` | 24 |
 
 ### Training-ready labeled subset
 
 Not every included patient in `patient_clinical_data.csv` has a binary modeling label. For model training and evaluation, the usable labeled subset is:
 
-- **1,386 labeled samples**
+- **1,387 labeled samples**
 - **522 labeled patients**
 - **884 labeled samples from 2025**
-- **502 labeled samples from 2024**
+- **503 labeled samples from 2024**
 
 The remaining **37 samples from 16 patients** are retained in `full_data`, but do not currently carry a usable binary training label in `patient_clinical_data.csv`.
 
@@ -105,11 +105,11 @@ This indicates a moderate class imbalance at the patient level.
 
 ### Sample-level label distribution
 
-Among the **1,386 labeled samples**:
+Among the **1,387 labeled samples**:
 
 | Binary label | Samples | Percent |
 |---|---:|---:|
-| `0` | 944 | 68.1% |
+| `0` | 945 | 68.1% |
 | `1` | 442 | 31.9% |
 
 Because most patients contribute either one or three images, the sample-level class ratio is effectively the same as the patient-level class ratio in this build.
@@ -120,7 +120,7 @@ Using the `stenosis_multiclass` field for the labeled subset:
 
 | Severity class | Samples | Percent |
 |---|---:|---:|
-| `0` | 943 | 68.0% |
+| `0` | 944 | 68.1% |
 | `1` | 158 | 11.4% |
 | `2` | 96 | 6.9% |
 | `3` | 185 | 13.4% |
@@ -170,7 +170,7 @@ Label availability is strongly tied to multimodal coverage:
 
 ### Final exclusions after extractability
 
-The final build excludes **87 otherwise extractable samples** from **46 patient IDs**. Every final exclusion shares the same reason:
+The final build excludes **86 otherwise extractable samples** from **45 patient IDs**. Every final exclusion shares the same reason:
 
 - **`no_patient_info_match`**: the sample could not be linked to a known patient record by patient ID or by a uniquely recoverable Chinese name.
 
@@ -208,7 +208,6 @@ The excluded patient IDs are:
 - `8260943张振和` (2 samples)
 - `8261002王清岭` (2 samples)
 - `CN093` (1 sample)
-- `GCOO5` (1 sample)
 - `GM104` (1 sample)
 - `GM106` (1 sample)
 - `GP105` (1 sample)
@@ -260,18 +259,18 @@ The builder now logs **29 raw source issues** in `datasets/full_data/source_issu
   - `missing_front_image`: 1
   - `missing_front_sequence_1`: 1
 
-Most previously unparseable 2025 filenames can now be structurally parsed. The remaining unresolved raw-data problems are therefore dominated by missing or orphaned source files, while most name-bearing but unmatched files have moved from `source_issues.csv` into `excluded_samples.csv` as explicit patient-linkage failures.
+Most previously unparseable 2025 filenames can now be structurally parsed. The current builder also supports fallback name extraction from both source filenames and multimodal `asr_file` metadata, plus conservative OCR-style patient-ID normalization when the normalized ID exactly matches a known patient. The remaining unresolved files are therefore dominated by true patient-linkage failures rather than filename parsing failures.
 
 ## Interpretation for Modeling
 
 For downstream ICAS modeling, two dataset definitions should be distinguished clearly in any manuscript:
 
 1. **The full matched storage dataset**
-   - 1,423 samples from 538 patients
+   - 1,424 samples from 538 patients
    - used as the canonical harmonized dataset bundle
 
 2. **The labeled training/evaluation subset**
-   - 1,386 samples from 522 patients
+   - 1,387 samples from 522 patients
    - the actual subset usable for supervised binary ICAS prediction under the current labels
 
 Because inference is performed on a single image at a time in the current codebase, the effective modeling unit is the **sample**, not the patient. However, patient identifiers remain essential for provenance tracking, cross-year linkage, and leakage-free dataset splitting.

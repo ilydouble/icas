@@ -157,6 +157,25 @@ def load_multimodal_ids(path: Path | None) -> set[str]:
         return {_normalize_id(row.get("patient_id", "")) for row in reader if _normalize_id(row.get("patient_id", ""))}
 
 
+def load_multimodal_lookup(path: Path | None) -> tuple[set[str], dict[str, list[str]]]:
+    if not path or not path.exists():
+        return set(), {}
+    multimodal_ids: set[str] = set()
+    name_to_ids: dict[str, set[str]] = {}
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "patient_id" not in reader.fieldnames:
+            return set(), {}
+        for row in reader:
+            patient_id = _normalize_id(row.get("patient_id", ""))
+            if not patient_id:
+                continue
+            multimodal_ids.add(patient_id)
+            for candidate in _extract_name_candidates_from_text(row.get("asr_file", "")):
+                name_to_ids.setdefault(candidate, set()).add(patient_id)
+    return multimodal_ids, {name: sorted(ids) for name, ids in name_to_ids.items()}
+
+
 def load_multimodal_records(path: Path | None) -> dict[str, dict[str, str]]:
     if not path or not path.exists():
         return {}
@@ -452,6 +471,25 @@ def _clean_name_candidate(text: str) -> str:
     return matches[-1] if matches else ""
 
 
+def _extract_name_candidates_from_text(text: str) -> list[str]:
+    normalized = str(text).strip()
+    if not normalized:
+        return []
+    candidates: list[str] = []
+    for chunk in re.split(r"[|;,]", normalized):
+        candidate = _clean_name_candidate(chunk)
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _normalize_id_ocr_variant(patient_id: str, all_known_ids: set[str]) -> str | None:
+    translated = patient_id.translate(str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "B": "8"}))
+    if translated != patient_id and translated in all_known_ids:
+        return translated
+    return None
+
+
 def _sample_candidate_name(sample: Sample) -> str:
     patient_name = _clean_name_candidate(sample.patient_id)
     if patient_name:
@@ -475,6 +513,15 @@ def _match_sample(
             matched_by="patient_id",
             clinical_available=patient_id in clinical_ids,
             multimodal_available=patient_id in multimodal_ids,
+        )
+    normalized_id = _normalize_id_ocr_variant(patient_id, all_known_ids)
+    if normalized_id:
+        return MatchInfo(
+            canonical_patient_id=normalized_id,
+            matched_by="patient_id",
+            clinical_available=normalized_id in clinical_ids,
+            multimodal_available=normalized_id in multimodal_ids,
+            notes=f"normalized_from:{patient_id}",
         )
 
     candidate_name = _sample_candidate_name(sample)
@@ -833,10 +880,15 @@ def main() -> None:
         print(result)
     elif args.command == "build-full":
         clinical_ids, name_to_clinical_ids = load_clinical_lookup(args.clinical_xlsx)
-        multimodal_ids = load_multimodal_ids(args.multimodal_csv)
+        multimodal_ids, name_to_multimodal_ids = load_multimodal_lookup(args.multimodal_csv)
         clinical_records = load_clinical_records(args.clinical_xlsx)
         multimodal_records = load_multimodal_records(args.multimodal_csv)
-        result = build_full_dataset(args.datasets, args.output, clinical_ids, multimodal_ids, name_to_clinical_ids, clinical_records, multimodal_records)
+        merged_name_lookup: dict[str, list[str]] = {}
+        for mapping in (name_to_clinical_ids, name_to_multimodal_ids):
+            for name, ids in mapping.items():
+                merged_name_lookup.setdefault(name, [])
+                merged_name_lookup[name] = sorted(set(merged_name_lookup[name]) | set(ids))
+        result = build_full_dataset(args.datasets, args.output, clinical_ids, multimodal_ids, merged_name_lookup, clinical_records, multimodal_records)
         print(result)
 
 
