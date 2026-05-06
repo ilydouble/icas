@@ -68,6 +68,37 @@ This refreshes:
 - `datasets/temperature_features_failures.csv`
 - `configs/data_split.json`
 
+## Generate Face ROI Annotations
+
+To generate face segmentation and facial ROI annotations for the current
+harmonized dataset, run:
+
+```bash
+python scripts/face_roi_annotation.py \
+  --manifest datasets/full_data/manifest.csv \
+  --face-seg-model models/4-segmentation.pt \
+  --roi-seg-model models/8-re_analyze.pt \
+  --output outputs/annotations
+```
+
+Useful optional arguments:
+
+- `--device cpu` or `--device cuda`
+- `--face-conf 0.25`
+- `--roi-conf 0.25`
+- `--padding 20`
+- `--roi-size 512`
+- `--limit 100` for a small test run
+
+This writes the main annotation artifacts under `outputs/annotations/`,
+including:
+
+- `annotations.json`
+- `annotations.jsonl`
+- `summary.csv`
+- `failures.csv`
+- `qc/index.html`
+
 ## Early Best CNN Configuration
 
 The strongest early `train_cnn_v2` run currently archived in `reports/` is
