@@ -23,7 +23,10 @@ class DatasetBuilderTests(unittest.TestCase):
         self.assertEqual(parse_2025_stem("001BD-正-1"), ("001BD", "正", 1))
         self.assertEqual(parse_2025_stem("001BD-正1"), ("001BD", "正", 1))
         self.assertEqual(parse_2025_stem("047FF张秀英-仰-2"), ("047FF", "仰", 2))
-        self.assertEqual(parse_2025_stem("孔村+3朱士苓-正-1"), (None, "正", 1))
+        self.assertEqual(parse_2025_stem("孔村+3朱士苓-正-1"), ("孔村+3朱士苓", "正", 1))
+        self.assertEqual(parse_2025_stem("6362403辛秉太-正1"), ("6362403辛秉太", "正", 1))
+        self.assertEqual(parse_2025_stem("FY001正-1"), ("FY001", "正", 1))
+        self.assertEqual(parse_2025_stem("CN026-正 -1"), ("CN026", "正", 1))
 
     def test_analysis_and_build_are_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,6 +111,43 @@ class DatasetBuilderTests(unittest.TestCase):
             with (output / "excluded_samples.csv").open(encoding="utf-8") as f:
                 excluded = list(csv.DictReader(f))
             self.assertEqual(excluded[0]["patient_id"], "UNKNOWN")
+
+    def test_full_dataset_recovers_2025_name_only_stems(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            datasets = root / "datasets"
+            photo_dir = datasets / "2025" / "热成像照片"
+            temp_dir = datasets / "2025" / "热成像温度数据"
+            photo_dir.mkdir(parents=True)
+            temp_dir.mkdir(parents=True)
+            for stem in ["孔村+3朱士苓-正-1", "6362403辛秉太-正1", "FY001正-1", "CN026-正 -1"]:
+                (photo_dir / f"{stem}.jpg").write_text("jpg", encoding="utf-8")
+                (temp_dir / f"{stem}.csv").write_text("csv", encoding="utf-8")
+
+            output = root / "full_data"
+            result = build_full_dataset(
+                datasets,
+                output,
+                clinical_ids={"CH046", "XB001", "FY001", "CN026"},
+                multimodal_ids=set(),
+                name_to_clinical_ids={"朱士苓": ["CH046"], "辛秉太": ["XB001"]},
+            )
+
+            self.assertEqual(result["included_samples"], 4)
+            self.assertEqual(result["excluded_samples"], 0)
+
+            with (output / "manifest.csv").open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            summary = {row["canonical_patient_id"]: row["matched_by"] for row in rows}
+            self.assertEqual(
+                summary,
+                {
+                    "CH046": "name",
+                    "XB001": "name",
+                    "FY001": "patient_id",
+                    "CN026": "patient_id",
+                },
+            )
 
 
 if __name__ == "__main__":

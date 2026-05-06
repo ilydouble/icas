@@ -14,7 +14,7 @@ from typing import Iterable
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 PATIENT_ID_RE = re.compile(r"^(?:\d{3}[A-Z]{2}|[A-Z]{1,3}\d{3})")
-VIEW_RE = re.compile(r"^(?P<raw_patient>.+?)-(?P<view>正|仰|左|右)-?(?P<sequence>\d+)$")
+VIEW_RE = re.compile(r"^(?P<raw_patient>.+?)-?(?P<view>正|仰|左|右)\s*-?\s*(?P<sequence>\d+)$")
 CHINESE_NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,5}")
 
 
@@ -82,7 +82,7 @@ def parse_2025_stem(stem: str) -> tuple[str | None, str | None, int | None]:
 
     raw_patient = match.group("raw_patient").strip()
     patient_match = PATIENT_ID_RE.match(raw_patient)
-    patient_id = patient_match.group(0) if patient_match else None
+    patient_id = patient_match.group(0) if patient_match else raw_patient
     return patient_id, match.group("view"), int(match.group("sequence"))
 
 
@@ -258,7 +258,7 @@ def _analyze_2025(year_dir: Path, clinical_ids: set[str], issues: list[Issue]) -
     for image_path in sorted(_iter_files(photo_dir, IMAGE_EXTENSIONS)):
         seen_image_stems.add(image_path.stem)
         patient_id, view, sequence = parse_2025_stem(image_path.stem.upper())
-        if patient_id is None or view is None or sequence is None:
+        if view is None or sequence is None:
             issues.append(Issue("2025", "", "unparseable_image_name", "Cannot parse patient id/view/sequence from image name.", str(image_path)))
             continue
         images_by_patient.setdefault(patient_id, []).append((image_path, view, sequence))
