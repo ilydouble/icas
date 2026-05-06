@@ -67,3 +67,42 @@ This refreshes:
 - `datasets/temperature_features.csv`
 - `datasets/temperature_features_failures.csv`
 - `configs/data_split.json`
+
+## Early Best CNN Configuration
+
+The strongest early `train_cnn_v2` run currently archived in `reports/` is
+`cnn_v2_results_20260505_113654.json`. Its key settings were:
+
+- `model=mobilenet`
+- `epochs=50`
+- `batch_size=32`
+- `lr=0.001`
+- `dropout=0.3`
+- `target_size=64`
+- `region_attention=true`
+- `multi_task=true`
+- `lambda_sev=0.3`
+- `use_face_mask=true`
+- `use_severity_weighting=true`
+- `augment=false`
+
+Its sample-level test metrics were:
+
+- `AUC-ROC = 0.6913`
+- `AUC-PR = 0.5386`
+- `F1 = 0.5352`
+
+To rerun that configuration directly:
+
+```bash
+python scripts/train_cnn_v2.py \
+  --model mobilenet \
+  --epochs 50 \
+  --batch-size 32 \
+  --lr 0.001 \
+  --dropout 0.3 \
+  --target-size 64 \
+  --region-attention \
+  --multi-task \
+  --lambda-sev 0.3
+```
