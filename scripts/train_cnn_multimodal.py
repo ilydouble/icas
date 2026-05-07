@@ -477,7 +477,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0)
     parser.add_argument("--freeze-thermal-epochs", type=int, default=0, help="Freeze the thermal branch for the first N epochs after initialization")
     parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"])
-    parser.add_argument("--selection-metric", type=str, default="f1", choices=["auc_roc", "f1"])
+    parser.add_argument("--selection-metric", type=str, default="auc_roc", choices=["auc_roc", "f1"])
     parser.add_argument("--device", type=str, default="auto")
     return parser.parse_args()
 

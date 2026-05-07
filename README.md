@@ -265,6 +265,9 @@ and writes:
 - `reports/cnn_multimodal_results_<timestamp>.json`
 - `reports/cnn_multimodal_history_<timestamp>.json`
 
+By default, the multimodal trainer now selects the best checkpoint by
+validation `auc_roc` and only uses `f1` to tune the final decision threshold.
+
 ## Coarse CNN Grid Search
 
 Before running `scripts/run_refined_search.py` or `scripts/run_local_search.py`
