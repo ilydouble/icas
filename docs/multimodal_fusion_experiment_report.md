@@ -21,7 +21,9 @@
 - `clinical top-3` 是目前最稳定的结构化分支。
 - ASR 分支在 current concat fusion 下更像噪声源，而不是稳定增益。
 - `thermal + ASR + clinical` 比 `thermal + ASR` 更好，说明 clinical 能纠偏。
-- 但当前多模态 CNN 仍未稳定超过强热力图单模态基线。
+- 当前端到端多模态 CNN 仍未稳定超过强热力图单模态基线。
+- 当前最佳融合结果不来自端到端 joint fusion，而来自固定 thermal CNN 后的 shallow fusion。
+- `thermal + clinical` 的 `logistic_stacking` 已经超过 `thermal_only` 和 `clinical_only`。
 - 新增的 `residual_clinical` 融合也已完成首轮实验，但目前仍未优于普通 `thermal + clinical` concat。
 
 ## 一、结构化分支的前置筛选结果
@@ -271,6 +273,60 @@
 
 所以目前不能直接把 residual clinical 当成更优默认方案。
 
+### 6. 固定 thermal CNN 后的 shallow fusion
+
+结果文件：
+
+- `reports/thermal_clinical_late_fusion_20260507_182608.csv`
+
+设计思路：
+
+- 不再继续更新深度学习 thermal 模型
+- 固定现有 thermal CNN 输出概率
+- 使用临床 top-3 训练一个浅层临床分支
+- 比较后融合和浅层 stacking
+
+结果如下：
+
+| 方法 | Test AUC-ROC | Test AUC-PR | Test F1 |
+|---|---:|---:|---:|
+| `thermal_only` | 0.6402 | 0.4530 | 0.5140 |
+| `clinical_only` | 0.7572 | 0.5706 | 0.6316 |
+| `weighted_late_fusion` | 0.7457 | 0.5864 | 0.5140 |
+| `logistic_stacking` | **0.7836** | **0.6022** | 0.6446 |
+| `tree_stacking_depth2` | 0.7079 | 0.5295 | 0.5263 |
+
+这里出现了本轮最关键的正向结果：
+
+- `logistic_stacking` 优于 `clinical_only`
+- `logistic_stacking` 也明显优于 `thermal_only`
+
+这说明 thermal 的信息并非无用，问题主要出在此前的融合方式，而不是“clinical 一强就无法再补充”。
+
+### 7. 加入 ASR 概率的三分支 shallow fusion
+
+结果文件：
+
+- `reports/thermal_clinical_late_fusion_20260507_183641.csv`
+
+在上面的 shallow fusion 基础上，进一步把 ASR 概率作为第三个分支接入，新增：
+
+- `logistic_stacking_3way`
+- `tree_stacking_depth2_3way`
+
+结果如下：
+
+| 方法 | Test AUC-ROC | Test AUC-PR | Test F1 |
+|---|---:|---:|---:|
+| `logistic_stacking_3way` | 0.5991 | 0.5258 | 0.3789 |
+| `tree_stacking_depth2_3way` | 0.7068 | 0.5516 | **0.6809** |
+
+结论：
+
+- ASR 加入线性 stacking 后没有提升，反而明显拖低了当前最优两分支结果
+- ASR 在浅层树模型里可能提供了一些规则型补充，因此 `F1` 较高
+- 但从主指标 `AUC` 看，仍然不如两分支 `logistic_stacking`
+
 ## 四、当前消融结论
 
 ### 1. 在当前 concat 结构里，clinical 比 ASR 更有价值
@@ -304,15 +360,21 @@
 - 失败模式比 ASR 更轻
 - 更接近 clinical-only 的已有结论
 
-### 4. 当前没有任何多模态版本明确击败强热力图单模态
+在当前所有试验里，它进一步演化成最有竞争力的具体方案：
 
-这是整个报告里最重要的保守结论。
+- 固定 thermal CNN
+- 保留 clinical top-3
+- 使用 `logistic_stacking`
 
-现有结果足以说明：
+### 4. 当前端到端多模态 CNN 没赢，但 shallow fusion 已经赢了
+
+这是当前最重要的更新。
+
+更准确地说：
 
 - “加结构化信息”不是自动增益
-- 当前多模态实验更多是在做机制探索
-- 在没有更稳的融合策略前，热力图单模态仍然是最可靠主线
+- 端到端 joint fusion 在当前数据规模下不稳定
+- 但 shallow fusion 已经能把 thermal 与 clinical 的优势叠起来
 
 ## 五、失败情况汇总
 
@@ -331,6 +393,10 @@
    - 理论上更保守
    - 但当前实现尚未带来实际提升
 
+4. `logistic_stacking_3way`
+   - ASR 作为第三分支加入后，明显拖低当前最优两分支结果
+   - 说明 ASR 目前不适合作为默认 stacking 输入
+
 这些失败结果不应被删除，因为它们明确缩小了下一步搜索空间。
 
 ## 六、推荐的阶段性结论
@@ -339,8 +405,9 @@
 
 1. 热力图单模态依然是当前最可靠主线。
 2. 临床 top-3 特征是最有价值的结构化补充分支。
-3. ASR 特征当前不建议继续作为默认融合输入。
-4. 现有多模态结果显示“直接 concat 融合”不足以稳定释放临床与语音的互补性。
+3. 当前最佳融合方案是：固定 thermal CNN + `clinical top-3` + `logistic_stacking`。
+4. ASR 特征当前不建议继续作为默认融合输入。
+5. 现有结果显示“直接 concat 融合”不足以稳定释放临床与语音的互补性，而 shallow fusion 更适合当前数据规模。
 
 ## 七、下一步建议
 
@@ -350,20 +417,21 @@
    - `mobilenet_multi_task_profile_a`
    - `deeper_profile_a__dropout_02`
 
-2. 继续推进 `thermal + clinical`
-   - 但优先做更小、更稳的策略改动
-   - 不再默认带 ASR
+2. 当前主线切换为 shallow fusion
+   - thermal CNN 固定
+   - `clinical top-3` 作为结构化主分支
+   - 默认方案：`logistic_stacking`
 
 3. 暂停 ASR 深度融合扩展
    - 至少在 current pipeline 下先暂停
-   - 如要重启，建议改为更轻的 gating 或后验修正，而不是 feature concat
+   - 当前 3-way shallow fusion 也没有证明它能提升主结果
 
-4. 报告比较时始终注明评估池差异
-   - `thermal + clinical` 目前运行在更大的 53-patient 测试池
-   - `full multimodal` 和 `thermal + ASR` 受 complete-case 约束，只在 38-patient 测试池上可直接互比
+4. 如果继续探索 ASR，只保留轻量观察位
+   - 可继续记录树模型下的局部规则型增益
+   - 但不纳入默认主结果
 
 这意味着明天之后最合理的工作方向是：
 
-- 继续把 `thermal + clinical` 主线做稳
-- 用更严格的同池比较判断它是否真超过热力图单模态
-- 暂不继续在 ASR 上投入大量调参时间
+- 把 `thermal + clinical` 的 `logistic_stacking` 作为当前主结果整理好
+- 视需要再用更强 thermal checkpoint 重跑 shallow fusion
+- 暂不继续在 ASR 上投入主要调参时间
