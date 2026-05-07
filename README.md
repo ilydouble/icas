@@ -288,6 +288,21 @@ python scripts/compare_complete_case_modalities.py \
   --no-search
 ```
 
+To keep the thermal CNN fixed and compare shallow fusion strategies against
+clinical top-3, run:
+
+```bash
+python scripts/compare_thermal_clinical_late_fusion.py \
+  --results-json reports/cnn_v3_results_20260507_161131.json \
+  --checkpoint reports/best_cnn_v3.pt \
+  --no-search
+```
+
+Important: `reports/best_cnn_v3.pt` is just the current checkpoint file path
+and may be overwritten by later runs. When you want to evaluate a specific
+thermal model, pair it with the matching `cnn_v3_results_<timestamp>.json` and
+the checkpoint produced by that same run.
+
 The script reads structured features from:
 
 - `reports/asr_candidate_modeling_subset.csv`
