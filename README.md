@@ -37,6 +37,8 @@ python scripts/extract_asr_features.py
 python scripts/analyze_asr_feature_correlations.py
 python scripts/select_asr_candidate_features.py
 python scripts/compare_asr_clinical_models.py --no-search
+python scripts/analyze_clinical_feature_correlations.py
+python scripts/select_clinical_candidate_features.py
 ```
 
 This produces:
@@ -47,6 +49,10 @@ This produces:
 - `reports/asr_candidate_feature_list.csv`
 - `reports/asr_candidate_modeling_subset.csv`
 - `reports/asr_clinical_model_comparison_<timestamp>.csv`
+- `reports/clinical_feature_correlation_scores.csv`
+- `reports/clinical_feature_correlation_report.md`
+- `reports/clinical_candidate_feature_list.csv`
+- `reports/clinical_candidate_modeling_subset.csv`
 
 The ASR feature table is merged by `canonical_patient_id` with
 `datasets/full_data/patient_clinical_data.csv`, so it can be used directly for
@@ -57,6 +63,9 @@ modeling table.
 The baseline comparison script then evaluates `asr_only`, `clinical_only`, and
 `fusion` feature sets with classical models for a quick sanity check before
 integrating ASR features into the larger pipeline.
+The clinical correlation scripts provide the same ranking and pruning workflow
+for structured patient variables, so ASR and clinical features can be screened
+symmetrically before any joint model is trained.
 
 ### 1. Re-extract temperature features
 
