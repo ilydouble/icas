@@ -40,6 +40,7 @@ python scripts/compare_asr_clinical_models.py --no-search
 python scripts/analyze_clinical_feature_correlations.py
 python scripts/select_clinical_candidate_features.py
 python scripts/compare_filtered_asr_clinical_models.py --no-search
+python scripts/compare_topk_filtered_asr_clinical_models.py --no-search --top-k-asr 3 --top-k-clinical 3
 ```
 
 This produces:
@@ -55,6 +56,7 @@ This produces:
 - `reports/clinical_candidate_feature_list.csv`
 - `reports/clinical_candidate_modeling_subset.csv`
 - `reports/filtered_asr_clinical_model_comparison_<timestamp>.csv`
+- `reports/topk_filtered_asr_clinical_model_comparison_<timestamp>.csv`
 
 The ASR feature table is merged by `canonical_patient_id` with
 `datasets/full_data/patient_clinical_data.csv`, so it can be used directly for
@@ -71,6 +73,9 @@ symmetrically before any joint model is trained.
 The filtered comparison script then evaluates only the screened ASR and
 screened clinical subsets, which is usually a better fusion sanity check than
 feeding all raw features into the same baseline model.
+The top-k ablation script is a stricter sanity check that keeps only the top
+few screened features from each branch before re-running the same classical
+model comparison.
 
 ### 1. Re-extract temperature features
 
