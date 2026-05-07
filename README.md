@@ -42,6 +42,7 @@ python scripts/select_clinical_candidate_features.py
 python scripts/compare_filtered_asr_clinical_models.py --no-search
 python scripts/compare_topk_filtered_asr_clinical_models.py --no-search --top-k-asr 3 --top-k-clinical 3
 python scripts/compare_late_fusion_asr_clinical.py --no-search --top-k-clinical 3 --asr-model GradientBoosting --asr-strategy standard --clinical-model LogisticRegression --clinical-strategy standard
+python scripts/search_clinical_only_models.py
 ```
 
 This produces:
@@ -59,6 +60,8 @@ This produces:
 - `reports/filtered_asr_clinical_model_comparison_<timestamp>.csv`
 - `reports/topk_filtered_asr_clinical_model_comparison_<timestamp>.csv`
 - `reports/late_fusion_asr_clinical_<timestamp>.csv`
+- `reports/clinical_only_refined_search_<timestamp>.csv`
+- `reports/clinical_only_refined_summary_<timestamp>.json`
 
 The ASR feature table is merged by `canonical_patient_id` with
 `datasets/full_data/patient_clinical_data.csv`, so it can be used directly for
