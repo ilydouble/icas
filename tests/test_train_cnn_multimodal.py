@@ -16,6 +16,7 @@ from scripts.train_cnn_multimodal import (
     ThermalStructuredFusionModel,
     broadcast_patient_features_to_samples,
     build_patient_sample_weight_lookup,
+    load_initial_thermal_weights,
     load_structured_feature_table,
 )
 
@@ -112,6 +113,28 @@ class FusionModelTests(unittest.TestCase):
 
         self.assertEqual(tuple(logits_cls.shape), (2, 2))
         self.assertEqual(tuple(logits_sev.shape), (2, 1))
+
+    def test_load_initial_thermal_weights_copies_matching_backbone_params(self):
+        model = ThermalStructuredFusionModel(
+            model_name="deeper",
+            structured_dim=len(ASR_TOP9_FEATURES) + len(CLINICAL_TOP3_FEATURES),
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=False,
+            pretrained=False,
+        )
+        state_dict = model.thermal_backbone.state_dict()
+        first_key = next(iter(state_dict))
+        source_weight = torch.full_like(state_dict[first_key], 0.25)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "thermal.pt"
+            torch.save({"model_state_dict": {first_key: source_weight}}, ckpt)
+            loaded = load_initial_thermal_weights(model, ckpt, torch.device("cpu"))
+
+        self.assertGreaterEqual(loaded, 1)
+        self.assertTrue(torch.allclose(model.thermal_backbone.state_dict()[first_key], source_weight))
 
 
 if __name__ == "__main__":

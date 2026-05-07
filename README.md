@@ -220,6 +220,40 @@ python scripts/train_cnn_multimodal.py --model mobilenet --multi-task --freeze-b
 python scripts/train_cnn_multimodal.py --region-attention --multi-task --device cuda
 ```
 
+Recommended refined-search-aligned starting commands:
+
+```bash
+python scripts/train_cnn_multimodal.py \
+  --model deeper \
+  --multi-task \
+  --dropout 0.2 \
+  --lr 0.001 \
+  --init-checkpoint reports/best_cnn_v3.pt \
+  --device cuda
+
+python scripts/train_cnn_multimodal.py \
+  --model mobilenet \
+  --multi-task \
+  --dropout 0.3 \
+  --lr 0.001 \
+  --lambda-sev 0.3 \
+  --init-checkpoint reports/best_cnn_v3.pt \
+  --device cuda
+```
+
+If multimodal fine-tuning is unstable right after loading a strong thermal-only
+checkpoint, try a very short thermal freeze instead of the older 3-epoch
+MobileNet backbone freeze:
+
+```bash
+python scripts/train_cnn_multimodal.py \
+  --model mobilenet \
+  --multi-task \
+  --init-checkpoint reports/best_cnn_v3.pt \
+  --freeze-thermal-epochs 1 \
+  --device cuda
+```
+
 The script reads structured features from:
 
 - `reports/asr_candidate_modeling_subset.csv`

@@ -144,6 +144,33 @@ def broadcast_patient_features_to_samples(
     return sample_features
 
 
+def load_initial_thermal_weights(
+    model: "ThermalStructuredFusionModel",
+    checkpoint_path: Path,
+    device: torch.device,
+) -> int:
+    """Load matching thermal-branch weights from a prior thermal checkpoint."""
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    source_state = checkpoint.get("model_state_dict", checkpoint)
+    target_state = model.thermal_backbone.state_dict()
+
+    matched: dict[str, Tensor] = {}
+    for key, value in source_state.items():
+        if key.startswith("thermal_backbone."):
+            candidate_key = key.split("thermal_backbone.", 1)[1]
+        else:
+            candidate_key = key
+        if candidate_key in target_state and tuple(target_state[candidate_key].shape) == tuple(value.shape):
+            matched[candidate_key] = value
+
+    if not matched:
+        return 0
+
+    target_state.update(matched)
+    model.thermal_backbone.load_state_dict(target_state)
+    return len(matched)
+
+
 class MultimodalTemperatureDataset(Dataset):
     """Wrap the thermal dataset with patient-level structured features."""
 
@@ -255,6 +282,8 @@ class ThermalStructuredFusionModel(nn.Module):
             self.severity_head = nn.Linear(fusion_hidden, 1)
 
     def set_backbone_trainable(self, trainable: bool) -> None:
+        for param in self.thermal_backbone.parameters():
+            param.requires_grad = trainable
         if isinstance(self.thermal_backbone, MobileNetV3Small):
             self.thermal_backbone.set_backbone_trainable(trainable)
 
@@ -440,11 +469,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--multi-task", action="store_true", help="Enable ICAS + severity joint training")
     parser.add_argument("--lambda-sev", type=float, default=0.3, help="Severity regression loss weight")
     parser.add_argument("--severity-beta", type=float, default=0.25, help="SmoothL1 beta for severity regression")
+    parser.add_argument("--init-checkpoint", type=Path, help="Optional prior thermal-only checkpoint used to initialize the thermal branch")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient clipping max norm; 0 disables clipping")
     parser.add_argument("--early-stop-patience", type=int, default=8)
     parser.add_argument("--early-stop-min-epochs", type=int, default=8)
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4)
     parser.add_argument("--freeze-backbone-epochs", type=int, default=0)
+    parser.add_argument("--freeze-thermal-epochs", type=int, default=0, help="Freeze the thermal branch for the first N epochs after initialization")
     parser.add_argument("--threshold-metric", type=str, default="f1", choices=["f1", "bal_acc"])
     parser.add_argument("--selection-metric", type=str, default="f1", choices=["auc_roc", "f1"])
     parser.add_argument("--device", type=str, default="auto")
@@ -563,6 +594,10 @@ def main() -> None:
         pretrained=not args.no_pretrained,
     ).to(device)
 
+    if args.init_checkpoint:
+        loaded = load_initial_thermal_weights(model, args.init_checkpoint, device)
+        print(f"Loaded {loaded} thermal parameters from {args.init_checkpoint}")
+
     class_weights = compute_class_weights(datasets["train"].base_dataset, device)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -575,21 +610,25 @@ def main() -> None:
     best_selection_score = float("-inf")
     best_epoch = 0
     history: list[dict] = []
-    backbone_trainable = True
+    thermal_trainable = True
     ckpt_path = args.output / "best_cnn_multimodal.pt"
 
     print(f"\nTraining for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
+        should_train_thermal = epoch > args.freeze_thermal_epochs
+        if should_train_thermal != thermal_trainable:
+            model.set_backbone_trainable(should_train_thermal)
+            thermal_trainable = should_train_thermal
+            state = "trainable" if should_train_thermal else "frozen"
+            print(f"  Epoch {epoch:3d}: thermal branch is now {state}")
+
         should_train_backbone = not (
             args.model == "mobilenet"
             and args.freeze_backbone_epochs > 0
             and epoch <= args.freeze_backbone_epochs
         )
-        if args.model == "mobilenet" and should_train_backbone != backbone_trainable:
-            model.set_backbone_trainable(should_train_backbone)
-            backbone_trainable = should_train_backbone
-            state = "trainable" if should_train_backbone else "frozen"
-            print(f"  Epoch {epoch:3d}: backbone is now {state}")
+        if args.model == "mobilenet" and should_train_backbone != should_train_thermal:
+            model.thermal_backbone.set_backbone_trainable(should_train_backbone and should_train_thermal)
 
         train_loss = train_epoch(
             model,
@@ -677,7 +716,9 @@ def main() -> None:
         "use_multi_task": args.multi_task,
         "lambda_sev": args.lambda_sev if args.multi_task else None,
         "severity_beta": args.severity_beta if args.multi_task else None,
+        "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
         "freeze_backbone_epochs": args.freeze_backbone_epochs if args.model == "mobilenet" else 0,
+        "freeze_thermal_epochs": args.freeze_thermal_epochs,
         "selection_metric": args.selection_metric,
         "threshold_metric": args.threshold_metric,
         "structured_asr_features": ASR_TOP9_FEATURES,
