@@ -43,6 +43,17 @@ CLINICAL_TOP3 = [
     "gender_encoded",
     "height",
 ]
+ASR_TOP9 = [
+    "asr_speech_rate_min",
+    "asr_chars_per_sentence_mean",
+    "asr_chars_per_second",
+    "asr_emotion_median",
+    "asr_long_pause_sentence_ratio",
+    "asr_pause_sentence_ratio",
+    "asr_sentence_duration_ms_mean",
+    "asr_sentence_duration_ms_min",
+    "asr_silence_duration_ms_mean",
+]
 
 
 def load_patient_pool(clinical_subset_path: Path) -> set[str]:
@@ -61,6 +72,21 @@ def build_probability_frame(
         ["canonical_patient_id", *CLINICAL_TOP3],
     ].copy()
     merged = deep_sub.merge(cli_sub, left_on="patient_id", right_on="canonical_patient_id", how="inner")
+    return merged.drop(columns=["canonical_patient_id"])
+
+
+def build_three_way_probability_frame(
+    deep_df: pd.DataFrame,
+    clinical_df: pd.DataFrame,
+    asr_prob_df: pd.DataFrame,
+    patient_pool: set[str],
+) -> pd.DataFrame:
+    base = build_probability_frame(deep_df, clinical_df, patient_pool)
+    asr_sub = asr_prob_df.loc[
+        asr_prob_df["canonical_patient_id"].astype(str).isin(patient_pool),
+        ["canonical_patient_id", "asr_prob"],
+    ].copy()
+    merged = base.merge(asr_sub, left_on="patient_id", right_on="canonical_patient_id", how="inner")
     return merged.drop(columns=["canonical_patient_id"])
 
 
@@ -107,8 +133,15 @@ def pick_best_alpha(
     return best_alpha, best_auc
 
 
-def make_meta_features(thermal_prob: np.ndarray, clinical_prob: np.ndarray) -> np.ndarray:
-    return np.column_stack([np.asarray(thermal_prob, dtype=float), np.asarray(clinical_prob, dtype=float)])
+def make_meta_features(
+    thermal_prob: np.ndarray,
+    clinical_prob: np.ndarray,
+    asr_prob: np.ndarray | None = None,
+) -> np.ndarray:
+    cols = [np.asarray(thermal_prob, dtype=float), np.asarray(clinical_prob, dtype=float)]
+    if asr_prob is not None:
+        cols.append(np.asarray(asr_prob, dtype=float))
+    return np.column_stack(cols)
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,10 +156,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--masks-dir", type=Path, default=Path("outputs/annotations/masks"))
     parser.add_argument("--npy-dir", type=Path, default=Path("datasets/npy_temperature"))
     parser.add_argument("--clinical-subset", type=Path, default=Path("reports/clinical_candidate_modeling_subset.csv"))
+    parser.add_argument("--asr-subset", type=Path, default=Path("reports/asr_candidate_modeling_subset.csv"))
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--clinical-model", type=str, default="LogisticRegression")
     parser.add_argument("--clinical-strategy", type=str, default="standard", choices=["standard", "severity_weighted"])
+    parser.add_argument("--asr-model", type=str, default="GradientBoosting")
+    parser.add_argument("--asr-strategy", type=str, default="standard", choices=["standard", "severity_weighted"])
     parser.add_argument("--alpha-grid", type=str, default="0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0")
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--no-search", action="store_true")
@@ -208,6 +244,64 @@ def main() -> None:
     clinical_val_prob = predict_prob(clinical_model, X_va_cli)
     clinical_test_prob = predict_prob(clinical_model, X_te_cli)
 
+    # Optional ASR branch for 3-way stacking.
+    asr_df = pd.read_csv(args.asr_subset)
+    if "clinical_match_status" in asr_df.columns:
+        asr_df = asr_df.loc[asr_df["clinical_match_status"] == "matched"].copy()
+    keep_cols = ["canonical_patient_id", "label", "stenosis_multiclass", *ASR_TOP9]
+    asr_df = asr_df.loc[:, keep_cols].copy()
+    for col in ASR_TOP9:
+        asr_df[col] = pd.to_numeric(asr_df[col], errors="coerce")
+    asr_df["label"] = pd.to_numeric(asr_df["label"], errors="coerce")
+    asr_df["stenosis_multiclass"] = pd.to_numeric(asr_df["stenosis_multiclass"], errors="coerce")
+    asr_df = asr_df.dropna(subset=["label", *ASR_TOP9]).reset_index(drop=True)
+
+    asr_patient_pool = patient_pool & set(asr_df["canonical_patient_id"].astype(str))
+    split_asr = {
+        **split,
+        "train_patient_ids": [pid for pid in split["train_patient_ids"] if pid in asr_patient_pool],
+        "val_patient_ids": [pid for pid in split["val_patient_ids"] if pid in asr_patient_pool],
+        "test_patient_ids": [pid for pid in split["test_patient_ids"] if pid in asr_patient_pool],
+    }
+    three_way_df = build_three_way_probability_frame(
+        deep_df,
+        clinical_df,
+        pd.DataFrame(
+            {
+                "canonical_patient_id": asr_df["canonical_patient_id"].astype(str),
+                # placeholder to be replaced after fitting ASR
+                "asr_prob": np.zeros(len(asr_df), dtype=float),
+            }
+        ),
+        asr_patient_pool,
+    )
+    X_tr_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["train_patient_ids"])][ASR_TOP9].values.astype(np.float32)
+    y_tr_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["train_patient_ids"])]["label"].astype(int).values
+    sev_tr_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["train_patient_ids"])]["stenosis_multiclass"].values
+    X_va_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["val_patient_ids"])][ASR_TOP9].values.astype(np.float32)
+    y_va_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["val_patient_ids"])]["label"].astype(int).values
+    X_te_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["test_patient_ids"])][ASR_TOP9].values.astype(np.float32)
+    y_te_asr = asr_df[asr_df["canonical_patient_id"].isin(split_asr["test_patient_ids"])]["label"].astype(int).values
+
+    asr_cfg = next(cfg for cfg in model_configs() if cfg["name"] == args.asr_model)
+    if args.asr_strategy == "severity_weighted" and not asr_cfg["supports_sample_weight"]:
+        raise ValueError(f"Model {args.asr_model} does not support strategy={args.asr_strategy}")
+    asr_pipe = asr_cfg["pipeline"] if args.asr_strategy == "standard" else asr_cfg["pipeline_sw"]
+    asr_sw = None if args.asr_strategy == "standard" else compute_severity_weights(y_tr_asr, sev_tr_asr)
+    asr_model, asr_params, asr_cv = fit_model(
+        asr_pipe,
+        X_tr_asr,
+        y_tr_asr,
+        asr_cfg["param_grid"],
+        do_search=not args.no_search,
+        cv_folds=args.cv_folds,
+        n_jobs=args.n_jobs,
+        sample_weight=asr_sw,
+        groups=None,
+    )
+    asr_val_prob = predict_prob(asr_model, X_va_asr)
+    asr_test_prob = predict_prob(asr_model, X_te_asr)
+
     # Weighted late fusion.
     alpha_grid = [float(x) for x in args.alpha_grid.split(",") if x.strip()]
     best_alpha, best_val_auc = pick_best_alpha(thermal_val_prob, clinical_val_prob, y_va, alpha_grid)
@@ -256,11 +350,54 @@ def main() -> None:
         **binary_metrics(y_te, tree_test_pred, tree_test_prob, "test"),
     })
 
+    # Three-way fusion and stacking on the ASR-complete subset only.
+    thermal_prob_lookup = dict(zip(prob_df["patient_id"], prob_df["cnn_prob"]))
+    clinical_prob_lookup = dict(zip(prob_df["patient_id"], predict_prob(clinical_model, prob_df[CLINICAL_TOP3].values.astype(np.float32))))
+    asr_prob_lookup = dict(zip(asr_df["canonical_patient_id"].astype(str), predict_prob(asr_model, asr_df[ASR_TOP9].values.astype(np.float32))))
+
+    def build_three_way_arrays(ids: list[str]):
+        sample_sub = deep_df[deep_df["patient_id"].isin(ids)].copy()
+        sample_sub = sample_sub[sample_sub["patient_id"].isin(asr_patient_pool)].copy()
+        y = sample_sub["label"].astype(int).values
+        thermal_prob = sample_sub["cnn_prob"].astype(float).values
+        clinical_prob = sample_sub["patient_id"].map(clinical_prob_lookup).astype(float).values
+        asr_prob = sample_sub["patient_id"].map(asr_prob_lookup).astype(float).values
+        return y, thermal_prob, clinical_prob, asr_prob
+
+    y_va_3, thermal_va_3, clinical_va_3, asr_va_3 = build_three_way_arrays(split_asr["val_patient_ids"])
+    y_te_3, thermal_te_3, clinical_te_3, asr_te_3 = build_three_way_arrays(split_asr["test_patient_ids"])
+    X_meta_val_3 = make_meta_features(thermal_va_3, clinical_va_3, asr_va_3)
+    X_meta_test_3 = make_meta_features(thermal_te_3, clinical_te_3, asr_te_3)
+
+    meta_logit_3 = LogisticRegression(max_iter=2000, random_state=42, class_weight="balanced")
+    meta_logit_3.fit(X_meta_val_3, y_va_3)
+    logit_test_prob_3 = meta_logit_3.predict_proba(X_meta_test_3)[:, 1]
+    logit_test_pred_3 = (logit_test_prob_3 >= 0.5).astype(int)
+
+    meta_tree_3 = DecisionTreeClassifier(max_depth=2, random_state=42)
+    meta_tree_3.fit(X_meta_val_3, y_va_3)
+    tree_test_prob_3 = meta_tree_3.predict_proba(X_meta_test_3)[:, 1]
+    tree_test_pred_3 = (tree_test_prob_3 >= 0.5).astype(int)
+
+    rows.append({
+        "method": "logistic_stacking_3way",
+        "asr_model": args.asr_model,
+        "asr_strategy": args.asr_strategy,
+        "asr_best_params": json.dumps(asr_params, ensure_ascii=False),
+        "asr_cv_auc_roc": asr_cv,
+        **binary_metrics(y_te_3, logit_test_pred_3, logit_test_prob_3, "test"),
+    })
+    rows.append({
+        "method": "tree_stacking_depth2_3way",
+        **binary_metrics(y_te_3, tree_test_pred_3, tree_test_prob_3, "test"),
+    })
+
     args.output.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_csv = args.output / f"thermal_clinical_late_fusion_{timestamp}.csv"
     pd.DataFrame(rows).to_csv(out_csv, index=False)
     print(f"Patient pool size: {len(patient_pool)}")
+    print(f"Three-way ASR-complete patient pool size: {len(asr_patient_pool)}")
     print(f"Thermal results JSON: {args.results_json}")
     print(f"Thermal checkpoint: {args.checkpoint}")
     print(f"Output CSV: {out_csv}")

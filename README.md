@@ -298,6 +298,10 @@ python scripts/compare_thermal_clinical_late_fusion.py \
   --no-search
 ```
 
+This script now also evaluates optional 3-way shallow stacking with ASR
+probabilities on the ASR-complete subset, while preserving the original
+thermal+clinical comparisons.
+
 Important: `reports/best_cnn_v3.pt` is just the current checkpoint file path
 and may be overwritten by later runs. When you want to evaluate a specific
 thermal model, pair it with the matching `cnn_v3_results_<timestamp>.json` and

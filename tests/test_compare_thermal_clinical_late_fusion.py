@@ -12,6 +12,7 @@ from scripts.compare_thermal_clinical_late_fusion import (
     build_probability_frame,
     make_meta_features,
     pick_best_alpha,
+    build_three_way_probability_frame,
 )
 
 
@@ -66,6 +67,48 @@ class MetaFeatureTests(unittest.TestCase):
         self.assertEqual(X.shape, (2, 2))
         self.assertTrue(np.allclose(X[:, 0], thermal))
         self.assertTrue(np.allclose(X[:, 1], clinical))
+
+    def test_make_meta_features_supports_optional_asr_branch(self):
+        thermal = np.array([0.2, 0.8], dtype=float)
+        clinical = np.array([0.3, 0.7], dtype=float)
+        asr = np.array([0.4, 0.6], dtype=float)
+
+        X = make_meta_features(thermal, clinical, asr)
+
+        self.assertEqual(X.shape, (2, 3))
+        self.assertTrue(np.allclose(X[:, 2], asr))
+
+
+class ThreeWayFrameTests(unittest.TestCase):
+    def test_build_three_way_probability_frame_merges_thermal_clinical_asr(self):
+        thermal_df = pd.DataFrame(
+            {
+                "sample_id": ["S1", "S2"],
+                "patient_id": ["P1", "P2"],
+                "label": [1, 0],
+                "stenosis_multiclass": [2, 0],
+                "cnn_prob": [0.7, 0.2],
+            }
+        )
+        clinical_df = pd.DataFrame(
+            {
+                "canonical_patient_id": ["P1", "P2"],
+                "waist_hip_ratio": [0.9, 0.8],
+                "gender_encoded": [1, 0],
+                "height": [170.0, 160.0],
+            }
+        )
+        asr_df = pd.DataFrame(
+            {
+                "canonical_patient_id": ["P1", "P2"],
+                "asr_prob": [0.6, 0.3],
+            }
+        )
+
+        merged = build_three_way_probability_frame(thermal_df, clinical_df, asr_df, {"P1", "P2"})
+
+        self.assertIn("asr_prob", merged.columns)
+        self.assertEqual(merged["patient_id"].tolist(), ["P1", "P2"])
 
 
 if __name__ == "__main__":
