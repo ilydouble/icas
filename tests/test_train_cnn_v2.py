@@ -9,8 +9,8 @@ import sys
 import numpy as np
 import torch
 
-import scripts.train_cnn_v2 as train_cnn_v2
-from scripts.train_cnn_v2 import (
+import scripts.train_cnn_v3 as train_cnn_v3
+from scripts.train_cnn_v3 import (
     EarlyStopping,
     apply_face_mask,
     compute_selection_score,
@@ -68,23 +68,23 @@ class CliParsingTests(unittest.TestCase):
     def test_main_rejects_patient_level_selection_metric(self):
         with mock.patch.object(sys, "argv", ["train_cnn_v2.py", "--selection-metric", "patient_auc_roc"]):
             with mock.patch.object(
-                train_cnn_v2,
+                train_cnn_v3,
                 "load_data",
                 side_effect=AssertionError("parser should reject patient-level selection metrics"),
             ):
                 with self.assertRaises(SystemExit) as ctx:
-                    train_cnn_v2.main()
+                    train_cnn_v3.main()
         self.assertEqual(ctx.exception.code, 2)
 
     def test_main_rejects_patient_level_aggregation_arg(self):
         with mock.patch.object(sys, "argv", ["train_cnn_v2.py", "--patient-aggregation", "max"]):
             with mock.patch.object(
-                train_cnn_v2,
+                train_cnn_v3,
                 "load_data",
                 side_effect=AssertionError("parser should reject patient aggregation configuration"),
             ):
                 with self.assertRaises(SystemExit) as ctx:
-                    train_cnn_v2.main()
+                    train_cnn_v3.main()
         self.assertEqual(ctx.exception.code, 2)
 
 

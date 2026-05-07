@@ -1,6 +1,6 @@
 {
   "description": "Patient-level stratified train/val/test split. Split by canonical_patient_id to prevent data leakage.",
-  "created_at": "2026-05-04 21:03:23",
+  "created_at": "2026-05-06 19:08:28",
   "seed": 42,
   "fractions": {
     "train": 0.8,
@@ -14,14 +14,14 @@
   "summary": {
     "train": {
       "n_patients": 416,
-      "n_samples": 1093,
+      "n_samples": 1096,
       "n_positive": 133,
       "n_negative": 283,
       "positive_rate": 0.3197
     },
     "val": {
       "n_patients": 53,
-      "n_samples": 138,
+      "n_samples": 140,
       "n_positive": 17,
       "n_negative": 36,
       "positive_rate": 0.3208

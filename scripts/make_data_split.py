@@ -47,7 +47,7 @@ def load_patients(
 
 def stratified_patient_split(
     patients: pd.DataFrame,
-    train_frac: float = 0.75,
+    train_frac: float = 0.80,
     val_frac: float = 0.10,
     seed: int = 42,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
@@ -110,7 +110,7 @@ def main() -> None:
                         default=Path("datasets/temperature_features.csv"))
     parser.add_argument("--output", type=Path,
                         default=Path("configs/data_split.json"))
-    parser.add_argument("--train-frac", type=float, default=0.75)
+    parser.add_argument("--train-frac", type=float, default=0.8)
     parser.add_argument("--val-frac", type=float, default=0.10)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
