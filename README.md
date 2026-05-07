@@ -278,6 +278,16 @@ python scripts/train_cnn_multimodal.py \
   --device cuda
 ```
 
+To compare `clinical_only / thermal_only / thermal+clinical` on the same
+current complete-case patient pool, run:
+
+```bash
+python scripts/compare_complete_case_modalities.py \
+  --results-json reports/cnn_v3_results_20260507_171253.json \
+  --checkpoint reports/best_cnn_v3.pt \
+  --no-search
+```
+
 The script reads structured features from:
 
 - `reports/asr_candidate_modeling_subset.csv`
