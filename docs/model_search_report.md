@@ -1,235 +1,288 @@
-# ICAS Model Search Report
+# ICAS CNN Grid Search Report
 
 ## Overview
 
-This report summarizes the latest CNN model search results for the ICAS thermal
-classification project. It consolidates two experiment groups:
+This report summarizes the latest CNN grid search results stored under
+`reports/grid_search/`, with the primary source file:
 
-1. the coarse architecture and ablation sweep in
-   `reports/grid_search/grid_search_summary.json`, and
-2. the focused augmentation comparison in
-   `reports/augmentation_search/augmentation_summary.json`.
+- `reports/grid_search/grid_search_summary.json`
 
-The main ranking metric in this report is **test AUC-ROC**. Test AUC-PR and
-test F1 are included as supporting metrics because several runs show clear
-ranking-versus-threshold trade-offs.
+The current report intentionally focuses on the **latest grid search batch only**
+and replaces the earlier mixed summary that combined older augmentation-search
+findings. The main ranking metric is **test AUC-ROC**. Test AUC-PR and test F1
+are included because several runs show meaningful ranking-versus-threshold
+trade-offs.
 
-## Data Sources And Scope
+The latest grid search contains **33 completed experiments** covering:
 
-### Grid search scope
+- `mobilenet` baselines
+- `mobilenet` with augmentation
+- region attention on/off
+- multi-task learning on/off
+- pretrained vs. no-pretrained
+- face-mask and severity-loss ablations
+- `simple` and `deeper` CNN baselines
+- three coarse hyperparameter profiles: `profile_a`, `profile_b`, `profile_c`
 
-The grid search compared:
+## Final Ranking Snapshot
 
-- MobileNet baselines,
-- augmentation on/off,
-- region attention on/off,
-- multi-task learning on/off,
-- pretrained versus no-pretrained variants,
-- face-mask and severity ablations, and
-- coarse hyperparameter profiles `profile_a`, `profile_b`, and `profile_c`.
+The top configurations by **test AUC-ROC** are:
 
-### Augmentation search scope
-
-The augmentation search fixed the model family to MobileNet with multi-task
-learning and compared:
-
-- `no_augment`
-- `mild_baseline`
-- `mild_no_flip`
-- `tiny_face_cutout`
-- `tiny_attention_guided_cutout`
-
-for `profile_a` and `profile_c`.
-
-### Comparability note
-
-Most results are directly comparable because they use the same task, split, and
-test metrics. However, repeated runs of the same nominal configuration can still
-show noticeable variation, so the tables below should be interpreted as
-**evidence for narrowing the search space**, not as a final statistical proof of
-superiority.
-
-## Final Comparison Table
-
-The table below highlights the most decision-relevant configurations across the
-two searches.
-
-| Rank | Source | Configuration | Test AUC-ROC | Test AUC-PR | Test F1 | Best Epoch | Interpretation |
-|---|---|---|---:|---:|---:|---:|---|
-| 1 | Grid search | `mobilenet_augment__profile_b` | 0.6588 | 0.5195 | 0.5083 | 4 | Best overall AUC-ROC in the coarse search. |
-| 2 | Grid search | `simple_baseline__profile_a` | 0.6514 | 0.4539 | 0.0000 | 14 | High ranking performance, but unusable threshold behavior at the default decision point. |
-| 3 | Grid search | `mobilenet_multi_task__profile_a` | 0.6397 | 0.4558 | 0.5140 | 1 | Best balanced result among the grid-search candidates. |
-| 4 | Augmentation rerun | `profile_a__no_augment` | 0.6397 | 0.4558 | 0.5140 | 1 | Reproduces the strong `profile_a` multi-task baseline without augmentation. |
-| 5 | Grid search | `mobilenet_region_attention__profile_c` | 0.6219 | 0.5114 | 0.3429 | 14 | Strong AUC-PR and the best region-attention result. |
-| 6 | Augmentation rerun | `profile_c__no_augment` | 0.6065 | 0.4338 | 0.1132 | 4 | Same search family as the `profile_c` multi-task baseline, but with very weak threshold behavior. |
-| 7 | Augmentation rerun | `profile_a__tiny_attention_guided_cutout` | 0.5813 | 0.4347 | 0.4848 | 7 | Best tested augmentation variant, but still worse than `profile_a__no_augment`. |
-| 8 | Augmentation rerun | `profile_a__mild_no_flip` | 0.5625 | 0.3981 | 0.5257 | 8 | Highest F1 among augmentation variants, but clearly lower ranking quality. |
+| Rank | Configuration | Test AUC-ROC | Test AUC-PR | Test F1 | Best Epoch | Interpretation |
+|---|---|---:|---:|---:|---:|---|
+| 1 | `deeper_baseline__profile_a` | 0.6478 | 0.4617 | 0.5333 | 1 | Best overall result in this grid search. |
+| 2 | `mobilenet_multi_task__profile_c` | 0.6407 | 0.4293 | 0.4792 | 4 | Strongest MobileNet run by AUC-ROC. |
+| 3 | `mobilenet_multi_task__profile_a` | 0.6397 | 0.4558 | 0.5140 | 1 | Best balanced MobileNet result. |
+| 4 | `mobilenet_region_attention_multi_task_no_severity__profile_b` | 0.6395 | 0.4235 | 0.5536 | 7 | Highest observed F1 with near-top AUC. |
+| 5 | `mobilenet_region_attention_multi_task_no_severity__profile_c` | 0.6197 | 0.4489 | 0.3030 | 25 | Strong AUC, weak threshold behavior. |
+| 6 | `mobilenet_region_attention_multi_task_no_pretrained__profile_a` | 0.6128 | 0.4047 | 0.0000 | 13 | Ranking signal exists, but default threshold fails completely. |
+| 7 | `mobilenet_region_attention_multi_task__profile_c` | 0.6001 | 0.4905 | 0.4390 | 14 | Best AUC-PR in the whole grid search. |
+| 8 | `mobilenet_region_attention__profile_c` | 0.5972 | 0.4532 | 0.3562 | 12 | Best pure region-attention run without multi-task. |
 
 ## Main Findings
 
-### 1. The current best overall candidate is `mobilenet_augment__profile_b`
+### 1. The current winner is `deeper_baseline__profile_a`
 
-This configuration achieved the highest observed test AUC-ROC (`0.6588`) and
-the highest observed test AUC-PR (`0.5195`) among the coarse grid-search runs.
-It is the best current candidate if the priority is ranking quality and overall
-retrieval of positive ICAS cases.
+This run is now the strongest result in the repository's latest grid search:
 
-### 2. The most balanced candidate is `mobilenet_multi_task__profile_a`
+- `test_auc_roc = 0.6478`
+- `test_auc_pr = 0.4617`
+- `test_f1 = 0.5333`
 
-The `mobilenet_multi_task__profile_a` configuration did not win on AUC-ROC, but
-it delivered a better balance across all three metrics:
+Its command-level configuration is:
 
-- AUC-ROC `0.6397`
-- AUC-PR `0.4558`
-- F1 `0.5140`
+- `model = deeper`
+- `target-size = 64`
+- `lr = 0.001`
+- `dropout = 0.3`
+- `weight-decay = 0.0001`
+- no region attention
+- no multi-task
+- no augmentation
 
-This makes it the safest baseline for the next round of targeted experiments.
+This is an important update because earlier working assumptions in the project
+were more favorable to `mobilenet`-based candidates. The new search suggests
+that a deeper plain CNN remains highly competitive, and currently sits at the
+top.
 
-### 3. Region attention is promising, but not yet dominant
+### 2. `mobilenet_multi_task` remains the most stable MobileNet family
 
-`mobilenet_region_attention__profile_c` was the strongest region-attention run
-and achieved notably strong AUC-PR (`0.5114`). This suggests that spatially
-focused modeling may improve ranking quality, especially for the positive class.
-However, its F1 remained modest (`0.3429`), so the present benefit appears to
-be stronger in ranking than in default-threshold classification.
+Two `mobilenet_multi_task` runs land in the top three:
 
-### 4. The tested augmentation variants did not beat the no-augmentation baseline
+- `mobilenet_multi_task__profile_c`
+- `mobilenet_multi_task__profile_a`
 
-In the dedicated augmentation rerun, both evaluated profiles ranked
-`no_augment` first:
+Although neither beats `deeper_baseline__profile_a`, this family still looks
+like the most reliable MobileNet branch because it performs well across more
+than one profile rather than winning only in one isolated case.
 
-| Profile | Best Strategy | Test AUC-ROC | Runner-Up | Delta AUC-ROC vs. `no_augment` |
-|---|---|---:|---|---:|
-| `profile_a` | `no_augment` | 0.6397 | `tiny_attention_guided_cutout` | -0.0584 |
-| `profile_c` | `no_augment` | 0.6065 | `mild_no_flip` | -0.1724 |
+Among these, `mobilenet_multi_task__profile_a` is still the best balanced
+MobileNet configuration:
 
-This is the clearest negative result in the search: the currently implemented
-light augmentation and tiny cutout variants did **not** improve test-set ranking
-performance.
+- `test_auc_roc = 0.6397`
+- `test_auc_pr = 0.4558`
+- `test_f1 = 0.5140`
 
-### 5. Several runs show metric disagreement
+### 3. Removing severity supervision can help
 
-Some configurations achieved good AUC but poor or even degenerate F1. The most
-extreme examples are:
+The strongest F1 in the entire grid search comes from:
 
-- `simple_baseline__profile_a`: AUC-ROC `0.6514`, F1 `0.0000`
-- `profile_a__mild_baseline`: AUC-ROC `0.5581`, F1 `0.0000`
-- `profile_c__no_augment`: AUC-ROC `0.6065`, F1 `0.1132`
+- `mobilenet_region_attention_multi_task_no_severity__profile_b`
 
-This pattern indicates that model ranking quality and default-threshold
-classification quality are not aligned consistently.
+with:
 
-## Likely Problems In The Current Search
+- `test_auc_roc = 0.6395`
+- `test_f1 = 0.5536`
 
-### 1. Threshold instability and poor calibration
+This is a meaningful result. It suggests that the current severity auxiliary
+task or severity-related weighting is not universally helpful and may be
+hurting the main ICAS objective under some settings.
 
-The repeated appearance of high-AUC / low-F1 runs suggests that some models are
-learning a useful ranking but produce scores that are poorly calibrated around
-the default threshold. This can make a model look strong in AUC metrics while
-still failing as a practical classifier.
+This ablation is strong enough that it should be revisited deliberately in the
+next round rather than treated as noise.
 
-### 2. High sensitivity to training profile
+### 4. Region attention is promising, but mixed
 
-The search is not showing a single universally strong recipe. For example:
+The strongest AUC-PR in the whole search comes from:
 
-- augmentation helped one coarse-search configuration (`profile_b`) but not the
-  focused augmentation reruns,
-- multi-task learning was excellent in `profile_a` but weak in other profiles,
-- region attention looked strongest in `profile_c`.
+- `mobilenet_region_attention_multi_task__profile_c`
+  - `test_auc_pr = 0.4905`
 
-This indicates that architecture choices and optimization settings are still
-strongly coupled.
+This keeps region attention in play. However, the region-attention family is
+not consistently dominant across profiles, and some related variants have weak
+F1 or unstable threshold behavior.
 
-### 3. Possible overfitting or unstable early stopping
+So the current evidence is:
 
-Many of the strongest runs peaked very early:
+- region attention can help ranking quality,
+- but its benefits are configuration-sensitive,
+- and it is not yet a clearly superior default.
 
-- epoch 1 for `mobilenet_multi_task__profile_a`
-- epoch 1 for `profile_a__no_augment`
-- epoch 4 for `mobilenet_augment__profile_b`
+### 5. Augmentation performed poorly in this search
 
-This may reflect a small effective training signal, unstable validation
-selection, or an optimization regime that converges sharply and then degrades.
+The `mobilenet_augment` family is clearly the weakest family overall:
 
-### 4. Search conclusions are still based on single-seed evidence
+- family mean `test_auc_roc = 0.3400`
+- family best `test_auc_roc = 0.3876`
 
-The current repository artifacts are effectively single-run comparisons. Without
-multiple seeds, it is difficult to distinguish a truly better recipe from a
-fortunate run.
+This is not a subtle result. In this grid search batch, augmentation is a
+negative finding and should not be enabled by default.
 
-### 5. Search batches are not yet fully normalized
+The weaker result may reflect augmentation design, thermal-domain mismatch, or
+an interaction with the current training regime, but operationally the
+conclusion is simple: **drop augmentation from the next short-list** unless the
+augmentation strategy is redesigned.
 
-Although the main summaries are usable, the experiment history shows that some
-searches were rerun and some configurations were revisited later. That does not
-invalidate the current tables, but it does mean the project still needs a clean,
-finalized confirmation phase under one consistent protocol.
+### 6. Face mask removal also looks harmful
 
-## Recommended Next Experiment Plan
+The `mobilenet_region_attention_multi_task_no_mask` family is weak:
 
-### Phase 1: Reproducibility confirmation
+- family mean `test_auc_roc = 0.4620`
+- family best `test_auc_roc = 0.5161`
 
-Run the top three candidate families with at least 3 to 5 random seeds:
+Compared with the stronger region-attention and multi-task families, the
+no-mask ablation underperforms clearly. The current evidence supports keeping
+face masking enabled.
 
-1. `mobilenet_augment__profile_b`
+## By-Family Summary
+
+### Best family peaks by test AUC-ROC
+
+| Family | Mean AUC-ROC | Best AUC-ROC | Interpretation |
+|---|---:|---:|---|
+| `deeper_baseline` | 0.5290 | 0.6478 | Highest single-run peak. |
+| `mobilenet_region_attention_multi_task_no_severity` | 0.6079 | 0.6395 | Strong family mean and strongest F1 profile. |
+| `mobilenet_multi_task` | 0.6061 | 0.6407 | Most stable MobileNet family. |
+| `mobilenet_region_attention_multi_task` | 0.5555 | 0.6001 | Promising, especially for AUC-PR. |
+| `mobilenet_region_attention` | 0.5378 | 0.5972 | Some signal, but weaker than stronger multi-task variants. |
+| `mobilenet_augment` | 0.3400 | 0.3876 | Clear negative result. |
+
+### Profile-level pattern
+
+By average AUC-ROC across all methods:
+
+| Profile | Mean AUC-ROC | Best AUC-ROC |
+|---|---:|---:|
+| `profile_a` | 0.5304 | 0.6478 |
+| `profile_b` | 0.5256 | 0.6395 |
+| `profile_c` | 0.5048 | 0.6407 |
+
+This suggests:
+
+- `profile_a` is still the safest overall coarse recipe,
+- `profile_b` can produce very strong threshold behavior in some ablations,
+- `profile_c` has slightly lower average quality but still contains several top
+  candidates.
+
+## Important Caveats
+
+### 1. Best epoch is often very early
+
+Several of the strongest runs peak very early:
+
+- `deeper_baseline__profile_a`: best epoch `1`
+- `mobilenet_multi_task__profile_a`: best epoch `1`
+- `simple_baseline__profile_b`: best epoch `1`
+
+This usually indicates one or more of:
+
+- validation noise,
+- unstable early stopping selection,
+- aggressive optimization relative to dataset size,
+- rapid overfitting after the first few epochs.
+
+This does not invalidate the results, but it does reduce confidence that the
+single best run is robust.
+
+### 2. Some runs have good AUC but degenerate F1
+
+Examples:
+
+- `mobilenet_region_attention_multi_task_no_pretrained__profile_a`
+- `mobilenet_region_attention_multi_task_no_pretrained__profile_b`
+
+Both have non-trivial AUC but `test_f1 = 0.0000`. That means ranking signal can
+exist while default-threshold classification is unusable. These runs should not
+be promoted without threshold tuning or calibration study.
+
+### 3. This is still single-seed evidence
+
+All rankings here are based on one seed (`42`) per configuration. The next
+decision should be based on reproducibility, not just the leaderboard order.
+
+## Recommended Shortlist
+
+If the goal is to decide what to verify next, the most defensible shortlist is:
+
+### AUC-first shortlist
+
+1. `deeper_baseline__profile_a`
+2. `mobilenet_multi_task__profile_c`
+3. `mobilenet_multi_task__profile_a`
+
+### Balanced-performance shortlist
+
+1. `deeper_baseline__profile_a`
+2. `mobilenet_region_attention_multi_task_no_severity__profile_b`
+3. `mobilenet_multi_task__profile_a`
+
+If you want only two immediate follow-up candidates, I would keep:
+
+1. `deeper_baseline__profile_a`
 2. `mobilenet_multi_task__profile_a`
-3. `mobilenet_region_attention__profile_c`
 
-For each family, report mean and standard deviation for AUC-ROC, AUC-PR, and
-F1. This should be the highest-priority next step.
+This pair gives one current overall winner and one stable, strong MobileNet
+baseline with better interpretability in the existing project narrative.
 
-### Phase 2: Threshold and calibration study
+## Recommended Next Steps
 
-For the same finalists, evaluate:
+### 1. Reproduce the top candidates with multiple seeds
 
-- validation-set threshold tuning,
-- probability calibration if needed, and
-- threshold-selected test F1 in addition to default-threshold test F1.
+Highest priority:
 
-This is important because several current runs appear to have usable ranking but
-poor decision-threshold behavior.
+1. `deeper_baseline__profile_a`
+2. `mobilenet_multi_task__profile_a`
+3. `mobilenet_region_attention_multi_task_no_severity__profile_b`
 
-### Phase 3: Focused refinement around the strongest balanced baseline
+Run each with at least 3 to 5 seeds and report:
 
-Use `mobilenet_multi_task__profile_a` as the primary refinement anchor and test
-small, controlled changes one at a time:
+- mean and std of test AUC-ROC
+- mean and std of test AUC-PR
+- mean and std of test F1
 
-- narrower learning-rate adjustments around `1e-3`,
-- early-stopping patience and minimum-epoch settings,
-- dropout around `0.2` to `0.4`,
-- severity-loss weight around the current `lambda-sev = 0.3`.
+### 2. Re-check threshold behavior
 
-This phase should aim to improve AUC without destroying the already reasonable
-F1.
+Because some runs show strong ranking but weak default-threshold classification,
+the next comparison should explicitly include:
 
-### Phase 4: Re-test augmentation only if it is redefined
+- default-threshold metrics
+- threshold-tuned validation-selected test F1
+- probability calibration if needed
 
-The current augmentation family has produced a negative result overall. The next
-augmentation round should be attempted only if it changes the design materially,
-for example:
+### 3. Keep augmentation out of the next round
 
-- weaker perturbation magnitude,
-- ROI-aware augmentation that preserves thermal structure better, or
-- augmentation policies tailored separately for `64x64` and `96x96` inputs.
+Do not spend the next round on the current augmentation family unless the
+augmentation design changes materially.
 
-Blindly repeating the same augmentation family is unlikely to be productive.
+### 4. Treat severity supervision as an open question
 
-### Phase 5: Investigate the region-attention path further
+Do not assume that multi-task severity supervision helps by default. The
+`no_severity` result is strong enough that this should become an explicit
+decision variable in the next focused search.
 
-Because `mobilenet_region_attention__profile_c` achieved strong ranking metrics,
-it should remain in scope. The next tests should determine whether its lower F1
-comes mainly from thresholding, calibration, or genuinely weaker separation near
-the operating point.
+## Working Conclusion
 
-## Recommended Working Conclusion
+The latest grid search changes the project picture in three important ways:
 
-At the current stage, the project should treat:
+1. the current best single run is now `deeper_baseline__profile_a`,
+2. `mobilenet_multi_task` remains the most stable MobileNet family, and
+3. the current augmentation setup is clearly not helping.
 
-- `mobilenet_augment__profile_b` as the **best AUC-first candidate**,
-- `mobilenet_multi_task__profile_a` as the **best balanced candidate**, and
-- `mobilenet_region_attention__profile_c` as the **most promising alternative
-  architecture for further validation**.
+If we want a practical next round, the cleanest plan is to verify:
 
-The focused augmentation search does not currently justify enabling augmentation
-by default for the multi-task MobileNet baseline. The next round should
-prioritize reproducibility, threshold analysis, and a tighter local refinement
-around the best balanced configuration.
+- `deeper_baseline__profile_a`
+- `mobilenet_multi_task__profile_a`
+- `mobilenet_region_attention_multi_task_no_severity__profile_b`
+
+and make the next decision from multi-seed evidence rather than from another
+large one-shot grid.
