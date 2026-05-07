@@ -254,6 +254,19 @@ python scripts/train_cnn_multimodal.py \
   --device cuda
 ```
 
+Structured-branch ablations are supported directly:
+
+```bash
+python scripts/train_cnn_multimodal.py --disable-asr --device cuda
+python scripts/train_cnn_multimodal.py --disable-clinical --device cuda
+```
+
+This makes it easy to compare:
+
+- thermal + ASR + clinical
+- thermal + clinical
+- thermal + ASR
+
 The script reads structured features from:
 
 - `reports/asr_candidate_modeling_subset.csv`

@@ -75,6 +75,19 @@ CLINICAL_TOP3_FEATURES = [
 SEVERITY_MULTIPLIER = {0: 1.0, 1: 1.0, 2: 1.5, 3: 2.0}
 
 
+def choose_structured_feature_names(
+    *,
+    disable_asr: bool,
+    disable_clinical: bool,
+) -> tuple[list[str], list[str]]:
+    """Return the active structured branches for branch ablations."""
+    asr_features = [] if disable_asr else list(ASR_TOP9_FEATURES)
+    clinical_features = [] if disable_clinical else list(CLINICAL_TOP3_FEATURES)
+    if not asr_features and not clinical_features:
+        raise ValueError("At least one structured branch must remain enabled.")
+    return asr_features, clinical_features
+
+
 def load_structured_feature_table(
     asr_subset_path: Path,
     clinical_subset_path: Path,
@@ -82,8 +95,8 @@ def load_structured_feature_table(
     clinical_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Load patient-level ASR + clinical features for multimodal fusion."""
-    asr_features = asr_features or ASR_TOP9_FEATURES
-    clinical_features = clinical_features or CLINICAL_TOP3_FEATURES
+    asr_features = list(ASR_TOP9_FEATURES) if asr_features is None else list(asr_features)
+    clinical_features = list(CLINICAL_TOP3_FEATURES) if clinical_features is None else list(clinical_features)
 
     asr_df = pd.read_csv(asr_subset_path)
     clinical_df = pd.read_csv(clinical_subset_path)
@@ -94,11 +107,17 @@ def load_structured_feature_table(
     asr_keep = ["canonical_patient_id", "label", "stenosis_multiclass", *asr_features]
     clinical_keep = ["canonical_patient_id", *clinical_features]
 
-    merged = asr_df.loc[:, asr_keep].merge(
-        clinical_df.loc[:, clinical_keep],
-        on="canonical_patient_id",
-        how="inner",
-    )
+    if asr_features and clinical_features:
+        merged = asr_df.loc[:, asr_keep].merge(
+            clinical_df.loc[:, clinical_keep],
+            on="canonical_patient_id",
+            how="inner",
+        )
+    elif asr_features:
+        merged = asr_df.loc[:, asr_keep].copy()
+    else:
+        clinical_base_cols = ["canonical_patient_id", "label", "stenosis_multiclass", *clinical_features]
+        merged = clinical_df.loc[:, clinical_base_cols].copy()
     merged["label"] = pd.to_numeric(merged["label"], errors="coerce")
     merged["stenosis_multiclass"] = pd.to_numeric(merged["stenosis_multiclass"], errors="coerce")
     feature_cols = asr_features + clinical_features
@@ -113,8 +132,8 @@ def build_patient_feature_lookup(
     asr_features: list[str] | None = None,
     clinical_features: list[str] | None = None,
 ) -> dict[str, np.ndarray]:
-    asr_features = asr_features or ASR_TOP9_FEATURES
-    clinical_features = clinical_features or CLINICAL_TOP3_FEATURES
+    asr_features = list(ASR_TOP9_FEATURES) if asr_features is None else list(asr_features)
+    clinical_features = list(CLINICAL_TOP3_FEATURES) if clinical_features is None else list(clinical_features)
     feature_cols = asr_features + clinical_features
     lookup: dict[str, np.ndarray] = {}
     for _, row in structured_df.iterrows():
@@ -445,6 +464,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--npy-dir", type=Path, default=Path("datasets/npy_temperature"))
     parser.add_argument("--asr-subset", type=Path, default=Path("reports/asr_candidate_modeling_subset.csv"))
     parser.add_argument("--clinical-subset", type=Path, default=Path("reports/clinical_candidate_modeling_subset.csv"))
+    parser.add_argument("--disable-asr", action="store_true", help="Disable the ASR structured branch")
+    parser.add_argument("--disable-clinical", action="store_true", help="Disable the clinical structured branch")
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -482,10 +503,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_datasets(args: argparse.Namespace, repo_root: Path) -> tuple[dict, dict[str, np.ndarray], dict[str, float], dict[str, float], dict[str, float]]:
+def build_datasets(
+    args: argparse.Namespace,
+    repo_root: Path,
+    asr_features: list[str],
+    clinical_features: list[str],
+) -> tuple[dict, dict[str, np.ndarray], dict[str, float], dict[str, float], dict[str, float]]:
     data = load_data(args.manifest, args.clinical, args.split, args.excluded, args.annotations)
-    structured_df = load_structured_feature_table(args.asr_subset, args.clinical_subset)
-    patient_features = build_patient_feature_lookup(structured_df)
+    structured_df = load_structured_feature_table(
+        args.asr_subset,
+        args.clinical_subset,
+        asr_features=asr_features,
+        clinical_features=clinical_features,
+    )
+    patient_features = build_patient_feature_lookup(
+        structured_df,
+        asr_features=asr_features,
+        clinical_features=clinical_features,
+    )
 
     def filter_complete_cases(samples: list[dict]) -> list[dict]:
         return [sample for sample in samples if str(sample["canonical_patient_id"]) in patient_features]
@@ -572,9 +607,23 @@ def main() -> None:
     print(f"Model: {args.model}")
     print(f"Use multi-task: {args.multi_task}")
     print(f"Use severity weighting: {not args.no_severity}")
-    print("Structured branch: 9 ASR + top-3 clinical")
+    asr_features, clinical_features = choose_structured_feature_names(
+        disable_asr=args.disable_asr,
+        disable_clinical=args.disable_clinical,
+    )
+    active_labels = []
+    if asr_features:
+        active_labels.append(f"{len(asr_features)} ASR")
+    if clinical_features:
+        active_labels.append(f"{len(clinical_features)} clinical")
+    print(f"Structured branch: {' + '.join(active_labels)}")
 
-    datasets, split_counts, patient_counts, _, split_info = build_datasets(args, repo_root)
+    datasets, split_counts, patient_counts, _, split_info = build_datasets(
+        args,
+        repo_root,
+        asr_features,
+        clinical_features,
+    )
     print(f"  Train: {split_counts['train']} samples / {patient_counts['train']} patients")
     print(f"  Val:   {split_counts['val']} samples / {patient_counts['val']} patients")
     print(f"  Test:  {split_counts['test']} samples / {patient_counts['test']} patients")
@@ -586,7 +635,7 @@ def main() -> None:
     in_channels = 2 if args.region_attention else 1
     model = ThermalStructuredFusionModel(
         model_name=args.model,
-        structured_dim=len(ASR_TOP9_FEATURES) + len(CLINICAL_TOP3_FEATURES),
+        structured_dim=len(asr_features) + len(clinical_features),
         dropout=args.dropout,
         in_channels=in_channels,
         img_size=args.target_size,
@@ -721,9 +770,11 @@ def main() -> None:
         "freeze_thermal_epochs": args.freeze_thermal_epochs,
         "selection_metric": args.selection_metric,
         "threshold_metric": args.threshold_metric,
-        "structured_asr_features": ASR_TOP9_FEATURES,
-        "structured_clinical_features": CLINICAL_TOP3_FEATURES,
-        "structured_feature_dim": len(ASR_TOP9_FEATURES) + len(CLINICAL_TOP3_FEATURES),
+        "structured_asr_features": asr_features,
+        "structured_clinical_features": clinical_features,
+        "structured_feature_dim": len(asr_features) + len(clinical_features),
+        "disable_asr": args.disable_asr,
+        "disable_clinical": args.disable_clinical,
         "patient_balanced_loss": True,
         "split_sample_counts": split_counts,
         "split_patient_counts": patient_counts,

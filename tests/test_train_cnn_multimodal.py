@@ -16,12 +16,29 @@ from scripts.train_cnn_multimodal import (
     ThermalStructuredFusionModel,
     broadcast_patient_features_to_samples,
     build_patient_sample_weight_lookup,
+    choose_structured_feature_names,
     load_initial_thermal_weights,
     load_structured_feature_table,
 )
 
 
 class StructuredFeatureTableTests(unittest.TestCase):
+    def test_choose_structured_feature_names_supports_branch_ablation(self):
+        asr_only, clinical_only = choose_structured_feature_names(disable_asr=False, disable_clinical=False)
+        self.assertEqual(asr_only, ASR_TOP9_FEATURES)
+        self.assertEqual(clinical_only, CLINICAL_TOP3_FEATURES)
+
+        asr_only, clinical_only = choose_structured_feature_names(disable_asr=True, disable_clinical=False)
+        self.assertEqual(asr_only, [])
+        self.assertEqual(clinical_only, CLINICAL_TOP3_FEATURES)
+
+        asr_only, clinical_only = choose_structured_feature_names(disable_asr=False, disable_clinical=True)
+        self.assertEqual(asr_only, ASR_TOP9_FEATURES)
+        self.assertEqual(clinical_only, [])
+
+        with self.assertRaises(ValueError):
+            choose_structured_feature_names(disable_asr=True, disable_clinical=True)
+
     def test_load_structured_feature_table_merges_filtered_asr_and_clinical(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -56,6 +73,55 @@ class StructuredFeatureTableTests(unittest.TestCase):
             self.assertEqual(
                 merged.columns.tolist(),
                 ["canonical_patient_id", "label", "stenosis_multiclass", *ASR_TOP9_FEATURES, *CLINICAL_TOP3_FEATURES],
+            )
+
+    def test_load_structured_feature_table_can_disable_one_branch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            asr_csv = root / "asr.csv"
+            clinical_csv = root / "clinical.csv"
+
+            pd.DataFrame(
+                {
+                    "canonical_patient_id": ["P1", "P2"],
+                    "clinical_match_status": ["matched", "matched"],
+                    "label": [1, 0],
+                    "stenosis_multiclass": [2, 0],
+                    **{name: [idx + 0.1, idx + 1.1] for idx, name in enumerate(ASR_TOP9_FEATURES)},
+                }
+            ).to_csv(asr_csv, index=False)
+
+            pd.DataFrame(
+                {
+                    "canonical_patient_id": ["P1", "P2"],
+                    "label": [1, 0],
+                    "stenosis_multiclass": [2, 0],
+                    "waist_hip_ratio": [0.90, 0.80],
+                    "gender_encoded": [1, 0],
+                    "height": [170.0, 160.0],
+                }
+            ).to_csv(clinical_csv, index=False)
+
+            clinical_only = load_structured_feature_table(
+                asr_csv,
+                clinical_csv,
+                asr_features=[],
+                clinical_features=CLINICAL_TOP3_FEATURES,
+            )
+            self.assertEqual(
+                clinical_only.columns.tolist(),
+                ["canonical_patient_id", "label", "stenosis_multiclass", *CLINICAL_TOP3_FEATURES],
+            )
+
+            asr_only = load_structured_feature_table(
+                asr_csv,
+                clinical_csv,
+                asr_features=ASR_TOP9_FEATURES,
+                clinical_features=[],
+            )
+            self.assertEqual(
+                asr_only.columns.tolist(),
+                ["canonical_patient_id", "label", "stenosis_multiclass", *ASR_TOP9_FEATURES],
             )
 
 
