@@ -195,6 +195,42 @@ python scripts/train_cnn_v2.py \
   --lambda-sev 0.3
 ```
 
+## Multimodal CNN Training
+
+To train a sample-level thermal CNN with patient-level structured features
+broadcast onto each sample, run:
+
+```bash
+python scripts/train_cnn_multimodal.py --device cuda
+```
+
+This multimodal script currently uses:
+
+- thermal image branch: one image per sample
+- ASR branch: filtered 9-dim patient-level ASR features
+- clinical branch: top-3 patient-level clinical features
+- fairness rule: each sample gets weight `1 / image_count(patient)` so patients
+  with 3 thermal images do not dominate those with 1 image
+
+Useful variants:
+
+```bash
+python scripts/train_cnn_multimodal.py --model deeper --multi-task --device cuda
+python scripts/train_cnn_multimodal.py --model mobilenet --multi-task --freeze-backbone-epochs 3 --device cuda
+python scripts/train_cnn_multimodal.py --region-attention --multi-task --device cuda
+```
+
+The script reads structured features from:
+
+- `reports/asr_candidate_modeling_subset.csv`
+- `reports/clinical_candidate_modeling_subset.csv`
+
+and writes:
+
+- `reports/best_cnn_multimodal.pt`
+- `reports/cnn_multimodal_results_<timestamp>.json`
+- `reports/cnn_multimodal_history_<timestamp>.json`
+
 ## Coarse CNN Grid Search
 
 Before running `scripts/run_refined_search.py` or `scripts/run_local_search.py`
