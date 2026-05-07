@@ -197,9 +197,10 @@ python scripts/train_cnn_v2.py \
 
 ## Coarse CNN Grid Search
 
-Before running `scripts/run_local_search.py` for local refinement, use the coarse
-mixed grid search to decide the rough winning recipe across method switches and
-representative hyperparameter profiles.
+Before running `scripts/run_refined_search.py` or `scripts/run_local_search.py`
+for local refinement, use the coarse mixed grid search to decide the rough
+winning recipe across method switches and representative hyperparameter
+profiles.
 
 Recommended command:
 
@@ -232,4 +233,28 @@ It writes logs and summaries under:
 - `reports/grid_search/grid_search_summary.json`
 
 Use this stage to choose the approximate winning family, then switch to
-`python scripts/run_local_search.py` for finer local search around that family.
+`python scripts/run_refined_search.py --preset repro` for shortlist
+reproducibility checks, or `python scripts/run_refined_search.py --preset focused`
+for a compact fine search around the latest shortlist.
+
+Useful refined-search commands:
+
+```bash
+python scripts/run_refined_search.py --preset repro --dry-run
+python scripts/run_refined_search.py --preset repro --device cuda
+python scripts/run_refined_search.py --preset focused --start-from 7 --limit 6
+```
+
+The refined search currently targets these shortlist families:
+
+- `deeper_baseline__profile_a`
+- `mobilenet_multi_task__profile_a`
+- `mobilenet_region_attention_multi_task_no_severity__profile_b`
+
+It writes logs and summaries under:
+
+- `reports/refined_search/`
+
+Keep `python scripts/run_local_search.py` as an additional fallback when you
+want a broader manual neighborhood search around a chosen MobileNet-style
+champion family.
