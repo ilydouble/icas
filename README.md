@@ -35,6 +35,7 @@ feature table and patient-level split configuration in this order:
 ```bash
 python scripts/extract_asr_features.py
 python scripts/analyze_asr_feature_correlations.py
+python scripts/select_asr_candidate_features.py
 ```
 
 This produces:
@@ -42,10 +43,15 @@ This produces:
 - `datasets/asr_2025_features.csv`
 - `reports/asr_feature_correlation_scores.csv`
 - `reports/asr_feature_correlation_report.md`
+- `reports/asr_candidate_feature_list.csv`
+- `reports/asr_candidate_modeling_subset.csv`
 
 The ASR feature table is merged by `canonical_patient_id` with
 `datasets/full_data/patient_clinical_data.csv`, so it can be used directly for
 multi-task supervision, correlation analysis, and speech feature screening.
+The candidate subset script keeps the top-ranked ASR features and removes
+highly redundant ones with correlation pruning before writing a compact
+modeling table.
 
 ### 1. Re-extract temperature features
 
