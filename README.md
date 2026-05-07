@@ -30,6 +30,23 @@ Key outputs will be refreshed under `datasets/full_data/`, including:
 After rebuilding `datasets/full_data`, refresh the downstream sample-level
 feature table and patient-level split configuration in this order:
 
+### 0. Extract ASR features and rank clinical associations
+
+```bash
+python scripts/extract_asr_features.py
+python scripts/analyze_asr_feature_correlations.py
+```
+
+This produces:
+
+- `datasets/asr_2025_features.csv`
+- `reports/asr_feature_correlation_scores.csv`
+- `reports/asr_feature_correlation_report.md`
+
+The ASR feature table is merged by `canonical_patient_id` with
+`datasets/full_data/patient_clinical_data.csv`, so it can be used directly for
+multi-task supervision, correlation analysis, and speech feature screening.
+
 ### 1. Re-extract temperature features
 
 ```bash
