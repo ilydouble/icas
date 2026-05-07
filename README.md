@@ -267,6 +267,17 @@ This makes it easy to compare:
 - thermal + clinical
 - thermal + ASR
 
+For a more conservative thermal + clinical fusion, use clinical residual
+correction instead of feature concatenation:
+
+```bash
+python scripts/train_cnn_multimodal.py \
+  --disable-asr \
+  --fusion-mode residual_clinical \
+  --init-checkpoint reports/best_cnn_v3.pt \
+  --device cuda
+```
+
 The script reads structured features from:
 
 - `reports/asr_candidate_modeling_subset.csv`

@@ -236,6 +236,42 @@ def extract_thermal_features(model: nn.Module, x_img: Tensor) -> Tensor:
     return model.dropout(F.relu(model.fc1(z)))
 
 
+def build_thermal_backbone(
+    model_name: str,
+    dropout: float,
+    in_channels: int,
+    img_size: int,
+    pretrained: bool,
+) -> nn.Module:
+    if model_name == "mobilenet":
+        return MobileNetV3Small(
+            num_classes=2,
+            dropout=dropout,
+            in_channels=in_channels,
+            img_size=img_size,
+            multi_task=False,
+            soft_label=False,
+            pretrained=pretrained,
+        )
+    if model_name == "deeper":
+        return DeeperCNN(
+            num_classes=2,
+            dropout=dropout,
+            in_channels=in_channels,
+            img_size=img_size,
+            multi_task=False,
+            soft_label=False,
+        )
+    return SimpleCNN(
+        num_classes=2,
+        dropout=dropout,
+        in_channels=in_channels,
+        img_size=img_size,
+        multi_task=False,
+        soft_label=False,
+    )
+
+
 class ThermalStructuredFusionModel(nn.Module):
     """Fuse single-image thermal features with structured ASR + clinical inputs."""
 
@@ -253,34 +289,13 @@ class ThermalStructuredFusionModel(nn.Module):
     ):
         super().__init__()
         self.multi_task = multi_task
-        if model_name == "mobilenet":
-            self.thermal_backbone = MobileNetV3Small(
-                num_classes=2,
-                dropout=dropout,
-                in_channels=in_channels,
-                img_size=img_size,
-                multi_task=False,
-                soft_label=False,
-                pretrained=pretrained,
-            )
-        elif model_name == "deeper":
-            self.thermal_backbone = DeeperCNN(
-                num_classes=2,
-                dropout=dropout,
-                in_channels=in_channels,
-                img_size=img_size,
-                multi_task=False,
-                soft_label=False,
-            )
-        else:
-            self.thermal_backbone = SimpleCNN(
-                num_classes=2,
-                dropout=dropout,
-                in_channels=in_channels,
-                img_size=img_size,
-                multi_task=False,
-                soft_label=False,
-            )
+        self.thermal_backbone = build_thermal_backbone(
+            model_name=model_name,
+            dropout=dropout,
+            in_channels=in_channels,
+            img_size=img_size,
+            pretrained=pretrained,
+        )
 
         with torch.no_grad():
             dummy_img = torch.zeros(1, in_channels, img_size, img_size)
@@ -313,6 +328,70 @@ class ThermalStructuredFusionModel(nn.Module):
         logits_cls = self.classifier_head(fused)
         if self.multi_task:
             logits_sev = self.severity_head(fused)
+            return logits_cls, logits_sev
+        return logits_cls
+
+
+class ClinicalResidualFusionModel(nn.Module):
+    """Thermal classifier plus a small clinical residual correction branch."""
+
+    def __init__(
+        self,
+        model_name: str,
+        clinical_dim: int,
+        dropout: float,
+        in_channels: int,
+        img_size: int,
+        multi_task: bool,
+        pretrained: bool = True,
+        clinical_hidden: int = 16,
+    ):
+        super().__init__()
+        if clinical_dim <= 0:
+            raise ValueError("Clinical residual fusion requires at least one clinical feature.")
+        self.multi_task = multi_task
+        self.thermal_backbone = build_thermal_backbone(
+            model_name=model_name,
+            dropout=dropout,
+            in_channels=in_channels,
+            img_size=img_size,
+            pretrained=pretrained,
+        )
+
+        with torch.no_grad():
+            dummy_img = torch.zeros(1, in_channels, img_size, img_size)
+            thermal_dim = int(extract_thermal_features(self.thermal_backbone, dummy_img).shape[1])
+
+        self.thermal_classifier = nn.Linear(thermal_dim, 2)
+        self.clinical_residual = nn.Sequential(
+            nn.Linear(clinical_dim, clinical_hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(clinical_hidden, 2),
+        )
+        self.clinical_gate = nn.Sequential(
+            nn.Linear(clinical_dim, clinical_hidden),
+            nn.ReLU(),
+            nn.Linear(clinical_hidden, 1),
+            nn.Sigmoid(),
+        )
+        if self.multi_task:
+            self.severity_head = nn.Linear(thermal_dim, 1)
+
+    def set_backbone_trainable(self, trainable: bool) -> None:
+        for param in self.thermal_backbone.parameters():
+            param.requires_grad = trainable
+        if isinstance(self.thermal_backbone, MobileNetV3Small):
+            self.thermal_backbone.set_backbone_trainable(trainable)
+
+    def forward(self, x_img: Tensor, x_clinical: Tensor) -> Tensor | tuple[Tensor, Tensor]:
+        thermal_feat = extract_thermal_features(self.thermal_backbone, x_img)
+        thermal_logits = self.thermal_classifier(thermal_feat)
+        residual_logits = self.clinical_residual(x_clinical)
+        gate = self.clinical_gate(x_clinical)
+        logits_cls = thermal_logits + gate * residual_logits
+        if self.multi_task:
+            logits_sev = self.severity_head(thermal_feat)
             return logits_cls, logits_sev
         return logits_cls
 
@@ -466,6 +545,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clinical-subset", type=Path, default=Path("reports/clinical_candidate_modeling_subset.csv"))
     parser.add_argument("--disable-asr", action="store_true", help="Disable the ASR structured branch")
     parser.add_argument("--disable-clinical", action="store_true", help="Disable the clinical structured branch")
+    parser.add_argument(
+        "--fusion-mode",
+        type=str,
+        default="concat",
+        choices=["concat", "residual_clinical"],
+        help="Structured fusion strategy. residual_clinical is intended for thermal + clinical only.",
+    )
     parser.add_argument("--output", type=Path, default=Path("reports"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -611,6 +697,8 @@ def main() -> None:
         disable_asr=args.disable_asr,
         disable_clinical=args.disable_clinical,
     )
+    if args.fusion_mode == "residual_clinical" and (asr_features or not clinical_features):
+        raise ValueError("residual_clinical fusion requires --disable-asr and an enabled clinical branch.")
     active_labels = []
     if asr_features:
         active_labels.append(f"{len(asr_features)} ASR")
@@ -633,15 +721,26 @@ def main() -> None:
     test_loader = DataLoader(datasets["test"], batch_size=args.batch_size, shuffle=False, num_workers=0)
 
     in_channels = 2 if args.region_attention else 1
-    model = ThermalStructuredFusionModel(
-        model_name=args.model,
-        structured_dim=len(asr_features) + len(clinical_features),
-        dropout=args.dropout,
-        in_channels=in_channels,
-        img_size=args.target_size,
-        multi_task=args.multi_task,
-        pretrained=not args.no_pretrained,
-    ).to(device)
+    if args.fusion_mode == "residual_clinical":
+        model = ClinicalResidualFusionModel(
+            model_name=args.model,
+            clinical_dim=len(clinical_features),
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=args.multi_task,
+            pretrained=not args.no_pretrained,
+        ).to(device)
+    else:
+        model = ThermalStructuredFusionModel(
+            model_name=args.model,
+            structured_dim=len(asr_features) + len(clinical_features),
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=args.multi_task,
+            pretrained=not args.no_pretrained,
+        ).to(device)
 
     if args.init_checkpoint:
         loaded = load_initial_thermal_weights(model, args.init_checkpoint, device)
@@ -773,6 +872,7 @@ def main() -> None:
         "structured_asr_features": asr_features,
         "structured_clinical_features": clinical_features,
         "structured_feature_dim": len(asr_features) + len(clinical_features),
+        "fusion_mode": args.fusion_mode,
         "disable_asr": args.disable_asr,
         "disable_clinical": args.disable_clinical,
         "patient_balanced_loss": True,

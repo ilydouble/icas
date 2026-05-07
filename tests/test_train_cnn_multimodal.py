@@ -13,6 +13,7 @@ import torch
 from scripts.train_cnn_multimodal import (
     ASR_TOP9_FEATURES,
     CLINICAL_TOP3_FEATURES,
+    ClinicalResidualFusionModel,
     ThermalStructuredFusionModel,
     broadcast_patient_features_to_samples,
     build_patient_sample_weight_lookup,
@@ -201,6 +202,36 @@ class FusionModelTests(unittest.TestCase):
 
         self.assertGreaterEqual(loaded, 1)
         self.assertTrue(torch.allclose(model.thermal_backbone.state_dict()[first_key], source_weight))
+
+    def test_clinical_residual_fusion_model_returns_logits_and_multitask_head(self):
+        model = ClinicalResidualFusionModel(
+            model_name="mobilenet",
+            clinical_dim=len(CLINICAL_TOP3_FEATURES),
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=True,
+            pretrained=False,
+        )
+        x_img = torch.randn(2, 1, 64, 64)
+        x_clinical = torch.randn(2, len(CLINICAL_TOP3_FEATURES))
+
+        logits_cls, logits_sev = model(x_img, x_clinical)
+
+        self.assertEqual(tuple(logits_cls.shape), (2, 2))
+        self.assertEqual(tuple(logits_sev.shape), (2, 1))
+
+    def test_clinical_residual_fusion_requires_clinical_branch(self):
+        with self.assertRaises(ValueError):
+            ClinicalResidualFusionModel(
+                model_name="deeper",
+                clinical_dim=0,
+                dropout=0.3,
+                in_channels=1,
+                img_size=64,
+                multi_task=False,
+                pretrained=False,
+            )
 
 
 if __name__ == "__main__":
