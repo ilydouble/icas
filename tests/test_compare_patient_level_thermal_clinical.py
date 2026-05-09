@@ -10,6 +10,7 @@ import pandas as pd
 from scripts.compare_patient_level_thermal_clinical import (
     CLINICAL_TOP3,
     build_patient_probability_frame,
+    make_probability_meta_features,
     build_sample_probability_frame,
 )
 
@@ -58,6 +59,16 @@ class FrameBuilderTests(unittest.TestCase):
 
         self.assertEqual(frame["canonical_patient_id"].tolist(), ["P1", "P1"])
         np.testing.assert_allclose(frame["thermal_prob"].to_numpy(), np.array([0.8, 0.6]))
+
+    def test_make_probability_meta_features_stacks_two_probability_columns(self):
+        thermal = np.array([0.2, 0.8], dtype=float)
+        clinical = np.array([0.3, 0.7], dtype=float)
+
+        X = make_probability_meta_features(thermal, clinical)
+
+        self.assertEqual(X.shape, (2, 2))
+        np.testing.assert_allclose(X[:, 0], thermal)
+        np.testing.assert_allclose(X[:, 1], clinical)
 
 
 if __name__ == "__main__":

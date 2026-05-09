@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.compare_asr_clinical_models import binary_metrics
+from scripts.compare_asr_clinical_models import binary_metrics, compute_severity_weights, fit_model, model_configs
 from scripts.compare_fusion_models import build_model_from_results, load_results_json
 from scripts.evaluate_patient_level_fusion import (
     aggregate_patient_predictions,
@@ -107,6 +107,25 @@ def build_patient_probability_frame(
     return merged
 
 
+def make_probability_meta_features(
+    thermal_prob: np.ndarray,
+    clinical_prob: np.ndarray,
+) -> np.ndarray:
+    """Stack branch probabilities for shallow meta fusion."""
+    return np.column_stack([
+        np.asarray(thermal_prob, dtype=float),
+        np.asarray(clinical_prob, dtype=float),
+    ])
+
+
+def predict_prob(model, X: np.ndarray) -> np.ndarray:
+    try:
+        return model.predict_proba(X)[:, 1]
+    except Exception:
+        preds = model.predict(X)
+        return np.asarray(preds, dtype=float)
+
+
 def _sample_arrays(frame: pd.DataFrame, patient_ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
     sub = frame[frame["canonical_patient_id"].isin(patient_ids)].copy()
     return sub["label"].to_numpy(dtype=int), sub["thermal_prob"].to_numpy(dtype=float)
@@ -143,6 +162,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--year-2025-weight", type=float, default=0.7)
     parser.add_argument("--patient-strategy", type=str, default="year_weighted_mean", choices=["prob_mean", "prob_max", "logit_mean", "year_weighted_mean"])
     parser.add_argument("--fusion-method", type=str, default="logistic_stacking", choices=["logistic_stacking"])
+    parser.add_argument("--clinical-model", type=str, default="LogisticRegression")
+    parser.add_argument("--clinical-strategy", type=str, default="standard", choices=["standard", "severity_weighted"])
+    parser.add_argument("--no-search", action="store_true")
+    parser.add_argument("--cv-folds", type=int, default=5)
+    parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument("--device", type=str, default="auto")
     return parser.parse_args()
 
@@ -273,17 +297,40 @@ def main() -> None:
     )
     patient_train_frame = build_patient_probability_frame(patient_train_ids, patient_train_y, patient_train_prob, clinical_df)
 
-    X_tr, y_tr, _ = _patient_arrays(patient_train_frame, train_ids)
-    X_va, y_va, thermal_val_prob_frame = _patient_arrays(patient_val_frame, val_ids_split)
-    X_te, y_te, thermal_test_prob_frame = _patient_arrays(patient_test_frame, test_ids_split)
-    del thermal_val_prob_frame, thermal_test_prob_frame
+    X_tr_full, y_tr, thermal_train_prob_frame = _patient_arrays(patient_train_frame, train_ids)
+    X_va_full, y_va, thermal_val_prob_frame = _patient_arrays(patient_val_frame, val_ids_split)
+    X_te_full, y_te, thermal_test_prob_frame = _patient_arrays(patient_test_frame, test_ids_split)
+    X_tr_cli = X_tr_full[:, 1:]
+    X_va_cli = X_va_full[:, 1:]
+    X_te_cli = X_te_full[:, 1:]
+
+    clinical_cfg = next(cfg for cfg in model_configs() if cfg["name"] == args.clinical_model)
+    if args.clinical_strategy == "severity_weighted" and not clinical_cfg["supports_sample_weight"]:
+        raise ValueError(f"Model {args.clinical_model} does not support strategy={args.clinical_strategy}")
+    clinical_pipe = clinical_cfg["pipeline"] if args.clinical_strategy == "standard" else clinical_cfg["pipeline_sw"]
+    clinical_sw = None if args.clinical_strategy == "standard" else compute_severity_weights(y_tr, y_tr)
+    clinical_model, clinical_params, clinical_cv = fit_model(
+        clinical_pipe,
+        X_tr_cli,
+        y_tr,
+        clinical_cfg["param_grid"],
+        do_search=not args.no_search,
+        cv_folds=args.cv_folds,
+        n_jobs=args.n_jobs,
+        sample_weight=clinical_sw,
+        groups=None,
+    )
+    clinical_val_prob = predict_prob(clinical_model, X_va_cli)
+    clinical_test_prob = predict_prob(clinical_model, X_te_cli)
 
     if args.fusion_method != "logistic_stacking":
         raise ValueError(f"Unsupported fusion_method: {args.fusion_method}")
-    fusion_model = LogisticRegression(max_iter=2000)
-    fusion_model.fit(X_tr, y_tr)
-    fusion_val_prob = fusion_model.predict_proba(X_va)[:, 1]
-    fusion_test_prob = fusion_model.predict_proba(X_te)[:, 1]
+    X_meta_val = make_probability_meta_features(thermal_val_prob_frame, clinical_val_prob)
+    X_meta_test = make_probability_meta_features(thermal_test_prob_frame, clinical_test_prob)
+    fusion_model = LogisticRegression(max_iter=2000, random_state=42, class_weight="balanced")
+    fusion_model.fit(X_meta_val, y_va)
+    fusion_val_prob = fusion_model.predict_proba(X_meta_val)[:, 1]
+    fusion_test_prob = fusion_model.predict_proba(X_meta_test)[:, 1]
     fusion_threshold, _ = find_best_threshold(y_va, fusion_val_prob, metric="f1")
     fusion_test_pred = (fusion_test_prob >= fusion_threshold).astype(int)
     fusion_metrics = binary_metrics(y_te, fusion_test_pred, fusion_test_prob, prefix="test")
@@ -308,6 +355,10 @@ def main() -> None:
             "evaluation_level": "patient",
             "thermal_strategy": args.patient_strategy,
             "clinical_fusion": args.fusion_method,
+            "clinical_model": args.clinical_model,
+            "clinical_strategy": args.clinical_strategy,
+            "clinical_best_params": json.dumps(clinical_params, ensure_ascii=False),
+            "clinical_cv_auc_roc": clinical_cv,
             **fusion_metrics,
         },
     ]
