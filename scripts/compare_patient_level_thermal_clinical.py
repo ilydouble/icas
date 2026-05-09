@@ -192,12 +192,13 @@ def main() -> None:
         model = build_model(args).to(device)
     load_checkpoint_for_inference(model, args.checkpoint, device)
 
-    multi_task = args.multi_task or args.soft_label
+    multi_task = bool(getattr(model, "multi_task", False))
+    soft_label = bool(getattr(model, "soft_label", False))
     val_ids, val_labels, val_probs = predict_sample_probabilities(
-        model, val_dataset, device, soft_label=args.soft_label, multi_task=multi_task
+        model, val_dataset, device, soft_label=soft_label, multi_task=multi_task
     )
     test_ids, test_labels, test_probs = predict_sample_probabilities(
-        model, test_dataset, device, soft_label=args.soft_label, multi_task=multi_task
+        model, test_dataset, device, soft_label=soft_label, multi_task=multi_task
     )
 
     val_metadata = build_sample_metadata_lookup(data["val"])
@@ -257,7 +258,7 @@ def main() -> None:
             npy_dir=npy_dir,
         ),
         device,
-        soft_label=args.soft_label,
+        soft_label=soft_label,
         multi_task=multi_task,
     )
     train_metadata = build_sample_metadata_lookup(data["train"])
