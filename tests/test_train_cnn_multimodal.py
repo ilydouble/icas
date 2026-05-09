@@ -221,6 +221,40 @@ class FusionModelTests(unittest.TestCase):
         self.assertEqual(tuple(logits_cls.shape), (2, 2))
         self.assertEqual(tuple(logits_sev.shape), (2, 1))
 
+    def test_fusion_model_supports_resnet50_backbone(self):
+        model = ThermalStructuredFusionModel(
+            model_name="resnet50",
+            structured_dim=len(ASR_TOP9_FEATURES) + len(CLINICAL_TOP3_FEATURES),
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=False,
+            pretrained=False,
+        )
+        x_img = torch.randn(2, 1, 64, 64)
+        x_struct = torch.randn(2, len(ASR_TOP9_FEATURES) + len(CLINICAL_TOP3_FEATURES))
+
+        logits_cls = model(x_img, x_struct)
+
+        self.assertEqual(tuple(logits_cls.shape), (2, 2))
+
+    def test_clinical_residual_fusion_model_supports_resnet50_backbone(self):
+        model = ClinicalResidualFusionModel(
+            model_name="resnet50",
+            clinical_dim=len(CLINICAL_TOP3_FEATURES),
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=False,
+            pretrained=False,
+        )
+        x_img = torch.randn(2, 1, 64, 64)
+        x_clinical = torch.randn(2, len(CLINICAL_TOP3_FEATURES))
+
+        logits_cls = model(x_img, x_clinical)
+
+        self.assertEqual(tuple(logits_cls.shape), (2, 2))
+
     def test_clinical_residual_fusion_requires_clinical_branch(self):
         with self.assertRaises(ValueError):
             ClinicalResidualFusionModel(

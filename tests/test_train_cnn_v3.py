@@ -1,12 +1,17 @@
-"""Unit tests for train_cnn_v3 augmentation helpers."""
+"""Unit tests for train_cnn_v3 helpers."""
 
 from __future__ import annotations
 
 import unittest
 
 import numpy as np
+import torch
 
-from scripts.train_cnn_v3 import build_cutout_candidate_mask, get_augmentation_strategy_config
+from scripts.train_cnn_v3 import (
+    ResNet50Backbone,
+    build_cutout_candidate_mask,
+    get_augmentation_strategy_config,
+)
 
 
 class BuildCutoutCandidateMaskTests(unittest.TestCase):
@@ -59,6 +64,41 @@ class AugmentationConfigTests(unittest.TestCase):
         self.assertEqual(config["strategy"], "attention_guided_cutout")
         self.assertLess(config["cutout_prob"], 0.5)
         self.assertEqual(config["cutout_scale_range"], (0.06, 0.1))
+
+
+class ResNet50BackboneTests(unittest.TestCase):
+    def test_resnet50_backbone_returns_logits_for_single_task(self):
+        model = ResNet50Backbone(
+            num_classes=2,
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=False,
+            soft_label=False,
+            pretrained=False,
+        )
+        x = torch.randn(2, 1, 64, 64)
+
+        logits = model(x)
+
+        self.assertEqual(tuple(logits.shape), (2, 2))
+
+    def test_resnet50_backbone_returns_logits_and_severity_for_multitask(self):
+        model = ResNet50Backbone(
+            num_classes=2,
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=True,
+            soft_label=False,
+            pretrained=False,
+        )
+        x = torch.randn(2, 1, 64, 64)
+
+        logits_cls, logits_sev = model(x)
+
+        self.assertEqual(tuple(logits_cls.shape), (2, 2))
+        self.assertEqual(tuple(logits_sev.shape), (2, 1))
 
 
 if __name__ == "__main__":
