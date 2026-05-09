@@ -8,6 +8,7 @@ import torch
 
 from scripts.train_cnn_pair import (
     PairSharedBackboneClassifier,
+    build_patient_pairs,
     build_cross_year_patient_pairs,
     build_patient_pair_weight_lookup,
 )
@@ -35,6 +36,33 @@ class CrossYearPairBuilderTests(unittest.TestCase):
                 ("2024_P1_1", "2025_P1_2"),
             },
         )
+
+    def test_build_patient_pairs_supports_cross_year_first(self):
+        samples = [
+            {"sample_id": "2024_P1_1", "canonical_patient_id": "P1", "year": 2024},
+            {"sample_id": "2025_P1_1", "canonical_patient_id": "P1", "year": 2025},
+            {"sample_id": "2025_P1_2", "canonical_patient_id": "P1", "year": 2025},
+        ]
+
+        pairs = build_patient_pairs(samples, pairing_mode="cross_year_first")
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]["sample_id_a"], "2024_P1_1")
+        self.assertEqual(pairs[0]["sample_id_b"], "2025_P1_1")
+
+    def test_build_patient_pairs_supports_within_2025_first2(self):
+        samples = [
+            {"sample_id": "2025_P1_1", "canonical_patient_id": "P1", "year": 2025},
+            {"sample_id": "2025_P1_2", "canonical_patient_id": "P1", "year": 2025},
+            {"sample_id": "2025_P1_3", "canonical_patient_id": "P1", "year": 2025},
+            {"sample_id": "2025_P2_1", "canonical_patient_id": "P2", "year": 2025},
+        ]
+
+        pairs = build_patient_pairs(samples, pairing_mode="within_2025_first2")
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]["sample_id_a"], "2025_P1_1")
+        self.assertEqual(pairs[0]["sample_id_b"], "2025_P1_2")
 
     def test_build_patient_pair_weight_lookup_balances_patients_by_pair_count(self):
         pairs = [

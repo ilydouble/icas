@@ -50,12 +50,43 @@ def _normalize_year(value: object) -> int | None:
         return None
 
 
-def build_cross_year_patient_pairs(
+PAIRING_MODES = ("cross_year_first", "cross_year_all", "within_2025_first2")
+
+
+def _build_pair_record(
+    patient_id: str,
+    sample_a: dict,
+    sample_b: dict,
+    pairing_mode: str,
+) -> dict:
+    sample_id_a = str(sample_a["sample_id"])
+    sample_id_b = str(sample_b["sample_id"])
+    record = {
+        "pair_id": f"{patient_id}_{sample_id_a}__{sample_id_b}",
+        "canonical_patient_id": patient_id,
+        "sample_id_a": sample_id_a,
+        "sample_id_b": sample_id_b,
+        "sample_a": sample_a,
+        "sample_b": sample_b,
+        "pairing_mode": pairing_mode,
+    }
+    year_a = _normalize_year(sample_a.get("year"))
+    year_b = _normalize_year(sample_b.get("year"))
+    if year_a == 2024:
+        record["sample_id_2024"] = sample_id_a
+    if year_b == 2025:
+        record["sample_id_2025"] = sample_id_b
+    return record
+
+
+def build_patient_pairs(
     samples: list[dict],
-    year_a: int = 2024,
-    year_b: int = 2025,
+    pairing_mode: str = "cross_year_all",
 ) -> list[dict]:
-    """Build all valid cross-year pairs for each patient."""
+    """Build patient-level pairs according to a named pairing strategy."""
+    if pairing_mode not in PAIRING_MODES:
+        raise ValueError(f"Unsupported pairing_mode: {pairing_mode}")
+
     by_patient: dict[str, dict[int, list[dict]]] = defaultdict(lambda: defaultdict(list))
     for sample in samples:
         patient_id = str(sample["canonical_patient_id"])
@@ -66,24 +97,35 @@ def build_cross_year_patient_pairs(
 
     pairs: list[dict] = []
     for patient_id, grouped in by_patient.items():
-        year_a_samples = sorted(grouped.get(year_a, []), key=lambda item: str(item["sample_id"]))
-        year_b_samples = sorted(grouped.get(year_b, []), key=lambda item: str(item["sample_id"]))
-        for sample_a in year_a_samples:
-            for sample_b in year_b_samples:
-                pair_id = f"{patient_id}_{sample_a['sample_id']}__{sample_b['sample_id']}"
-                pairs.append(
-                    {
-                        "pair_id": pair_id,
-                        "canonical_patient_id": patient_id,
-                        "sample_id_2024": str(sample_a["sample_id"]),
-                        "sample_id_2025": str(sample_b["sample_id"]),
-                        "sample_2024": sample_a,
-                        "sample_2025": sample_b,
-                        "year_a": year_a,
-                        "year_b": year_b,
-                    }
-                )
+        samples_2024 = sorted(grouped.get(2024, []), key=lambda item: str(item["sample_id"]))
+        samples_2025 = sorted(grouped.get(2025, []), key=lambda item: str(item["sample_id"]))
+
+        if pairing_mode == "cross_year_all":
+            for sample_2024 in samples_2024:
+                for sample_2025 in samples_2025:
+                    pairs.append(_build_pair_record(patient_id, sample_2024, sample_2025, pairing_mode))
+            continue
+
+        if pairing_mode == "cross_year_first":
+            if samples_2024 and samples_2025:
+                pairs.append(_build_pair_record(patient_id, samples_2024[0], samples_2025[0], pairing_mode))
+            continue
+
+        if pairing_mode == "within_2025_first2" and len(samples_2025) >= 2:
+            pairs.append(_build_pair_record(patient_id, samples_2025[0], samples_2025[1], pairing_mode))
+
     return pairs
+
+
+def build_cross_year_patient_pairs(
+    samples: list[dict],
+    year_a: int = 2024,
+    year_b: int = 2025,
+) -> list[dict]:
+    """Build all valid cross-year pairs for each patient."""
+    if year_a != 2024 or year_b != 2025:
+        raise ValueError("build_cross_year_patient_pairs currently supports the 2024->2025 setting only.")
+    return build_patient_pairs(samples, pairing_mode="cross_year_all")
 
 
 def build_patient_pair_weight_lookup(pairs: list[dict]) -> dict[str, float]:
@@ -115,18 +157,18 @@ class PairTemperatureDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, str]:
         pair = self.pairs[idx]
-        x_2024, y_2024, sev_2024, _ = self.base_dataset[self.sample_index[pair["sample_id_2024"]]]
-        x_2025, y_2025, sev_2025, _ = self.base_dataset[self.sample_index[pair["sample_id_2025"]]]
-        if int(y_2024.item()) != int(y_2025.item()):
+        x_a, y_a, sev_a, _ = self.base_dataset[self.sample_index[pair["sample_id_a"]]]
+        x_b, y_b, sev_b, _ = self.base_dataset[self.sample_index[pair["sample_id_b"]]]
+        if int(y_a.item()) != int(y_b.item()):
             raise ValueError(f"Mismatched labels within pair {pair['pair_id']}")
-        if int(sev_2024.item()) != int(sev_2025.item()):
+        if int(sev_a.item()) != int(sev_b.item()):
             raise ValueError(f"Mismatched severities within pair {pair['pair_id']}")
         pair_weight = self.pair_weights.get(str(pair["pair_id"]), 1.0)
         return (
-            x_2024,
-            x_2025,
-            y_2024,
-            sev_2024,
+            x_a,
+            x_b,
+            y_a,
+            sev_a,
             torch.tensor(pair_weight, dtype=torch.float32),
             str(pair["pair_id"]),
         )
@@ -295,10 +337,11 @@ def build_pair_datasets(
     augmentation_strategy: str,
     region_attention: bool,
     npy_dir: Path | None,
+    pairing_mode: str,
 ) -> tuple[PairTemperatureDataset, PairTemperatureDataset, PairTemperatureDataset]:
-    train_pairs = build_cross_year_patient_pairs(data["train"])
-    val_pairs = build_cross_year_patient_pairs(data["val"])
-    test_pairs = build_cross_year_patient_pairs(data["test"])
+    train_pairs = build_patient_pairs(data["train"], pairing_mode=pairing_mode)
+    val_pairs = build_patient_pairs(data["val"], pairing_mode=pairing_mode)
+    test_pairs = build_patient_pairs(data["test"], pairing_mode=pairing_mode)
 
     train_base = TemperatureDataset(
         data["train"],
@@ -441,6 +484,7 @@ def main() -> None:
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet", "resnet50"])
+    parser.add_argument("--pairing-mode", type=str, default="cross_year_all", choices=list(PAIRING_MODES))
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-mask", action="store_true")
     parser.add_argument("--no-severity", action="store_true")
@@ -489,8 +533,10 @@ def main() -> None:
         augmentation_strategy=args.augmentation_strategy,
         region_attention=args.region_attention,
         npy_dir=args.npy_dir if args.npy_dir.exists() else None,
+        pairing_mode=args.pairing_mode,
     )
 
+    print(f"Pairing mode: {args.pairing_mode}")
     print(f"Train pairs: {len(train_dataset)}")
     print(f"Val pairs: {len(val_dataset)}")
     print(f"Test pairs: {len(test_dataset)}")
@@ -543,11 +589,11 @@ def main() -> None:
 
     for epoch in range(1, args.epochs + 1):
         should_train_backbone = not (
-            args.model == "mobilenet"
+            args.model in {"mobilenet", "resnet50"}
             and args.freeze_backbone_epochs > 0
             and epoch <= args.freeze_backbone_epochs
         )
-        if args.model == "mobilenet" and should_train_backbone != backbone_trainable:
+        if args.model in {"mobilenet", "resnet50"} and should_train_backbone != backbone_trainable:
             model.set_backbone_trainable(should_train_backbone)
             backbone_trainable = should_train_backbone
 
@@ -606,7 +652,7 @@ def main() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results = {
         "experiment": "cross_year_patient_pair",
-        "pairing_rule": "all valid 2024 x 2025 pairs within patient",
+        "pairing_rule": args.pairing_mode,
         "model": args.model,
         "epochs": args.epochs,
         "best_epoch": best_epoch,

@@ -24,21 +24,21 @@ from datetime import datetime
 from pathlib import Path
 
 QUICK_EXPERIMENTS = [
-    {"model": "mobilenet", "epochs": 30},
-    {"model": "mobilenet", "epochs": 30, "multi-task": True, "lambda-sev": 0.3},
-    {"model": "resnet50", "epochs": 30, "lr": 0.0003, "batch-size": 8},
-    {"model": "resnet50", "epochs": 30, "multi-task": True, "lambda-sev": 0.2, "lr": 0.0003, "batch-size": 8},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "cross_year_first"},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "within_2025_first2"},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "cross_year_all", "lr": 0.0003, "batch-size": 8},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "within_2025_first2", "multi-task": True, "lambda-sev": 0.2, "lr": 0.0003, "batch-size": 8},
 ]
 
 FOCUSED_EXPERIMENTS = [
-    {"model": "mobilenet", "epochs": 30},
-    {"model": "mobilenet", "epochs": 30, "multi-task": True, "lambda-sev": 0.3},
-    {"model": "mobilenet", "epochs": 30, "augment": True, "augmentation-strategy": "mild_no_flip"},
-    {"model": "mobilenet", "epochs": 30, "multi-task": True, "lambda-sev": 0.2, "augment": True, "augmentation-strategy": "mild_no_flip"},
-    {"model": "resnet50", "epochs": 30, "lr": 0.0003, "batch-size": 8},
-    {"model": "resnet50", "epochs": 30, "multi-task": True, "lambda-sev": 0.2, "lr": 0.0003, "batch-size": 8},
-    {"model": "resnet50", "epochs": 30, "lr": 0.0003, "batch-size": 8, "freeze-backbone-epochs": 3},
-    {"model": "resnet50", "epochs": 30, "multi-task": True, "lambda-sev": 0.2, "lr": 0.0003, "batch-size": 8, "freeze-backbone-epochs": 3},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "cross_year_first"},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "cross_year_all"},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "within_2025_first2"},
+    {"model": "mobilenet", "epochs": 30, "pairing-mode": "within_2025_first2", "augment": True, "augmentation-strategy": "mild_no_flip"},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "cross_year_first", "lr": 0.0003, "batch-size": 8},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "cross_year_all", "lr": 0.0003, "batch-size": 8},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "within_2025_first2", "lr": 0.0003, "batch-size": 8},
+    {"model": "resnet50", "epochs": 30, "pairing-mode": "within_2025_first2", "multi-task": True, "lambda-sev": 0.2, "lr": 0.0003, "batch-size": 8, "freeze-backbone-epochs": 3},
 ]
 
 DEFAULT_TRAINING_ARGS = {

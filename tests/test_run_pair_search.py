@@ -14,12 +14,14 @@ class BuildCommandTests(unittest.TestCase):
 
     def test_build_command_includes_overrides(self):
         cmd = build_command(
-            {"model": "mobilenet", "multi-task": True},
+            {"model": "mobilenet", "multi-task": True, "pairing-mode": "within_2025_first2"},
             npy_dir="datasets/npy_temperature",
             batch_size=8,
             device="cuda:0",
         )
         self.assertIn("--multi-task", cmd)
+        self.assertIn("--pairing-mode", cmd)
+        self.assertIn("within_2025_first2", cmd)
         self.assertIn("--batch-size", cmd)
         self.assertIn("8", cmd)
         self.assertIn("--device", cmd)
@@ -27,11 +29,14 @@ class BuildCommandTests(unittest.TestCase):
 
 
 class ResolveExperimentsTests(unittest.TestCase):
-    def test_quick_preset_contains_resnet_and_mobilenet(self):
+    def test_quick_preset_contains_resnet_mobilenet_and_pairing_modes(self):
         experiments = resolve_experiments("quick")
         models = {exp["model"] for exp in experiments}
+        pairing_modes = {exp["pairing-mode"] for exp in experiments}
         self.assertIn("mobilenet", models)
         self.assertIn("resnet50", models)
+        self.assertIn("cross_year_first", pairing_modes)
+        self.assertIn("within_2025_first2", pairing_modes)
 
 
 class ParseArgsTests(unittest.TestCase):
