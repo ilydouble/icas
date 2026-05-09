@@ -440,7 +440,7 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet"])
+    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet", "resnet50"])
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-mask", action="store_true")
     parser.add_argument("--no-severity", action="store_true")

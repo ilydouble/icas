@@ -41,6 +41,7 @@ from scripts.train_cnn_v3 import (
     AUGMENTATION_STRATEGIES,
     EarlyStopping,
     MobileNetV3Small,
+    ResNet50Backbone,
     SimpleCNN,
     DeeperCNN,
     TemperatureDataset,
@@ -224,6 +225,8 @@ def extract_thermal_features(model: nn.Module, x_img: Tensor) -> Tensor:
     """Expose the penultimate thermal representation from the chosen CNN."""
     if isinstance(model, MobileNetV3Small):
         return model.backbone(x_img)
+    if isinstance(model, ResNet50Backbone):
+        return model.backbone(x_img)
     if isinstance(model, DeeperCNN):
         z = model.features(x_img)
         z = z.view(z.size(0), -1)
@@ -245,6 +248,16 @@ def build_thermal_backbone(
 ) -> nn.Module:
     if model_name == "mobilenet":
         return MobileNetV3Small(
+            num_classes=2,
+            dropout=dropout,
+            in_channels=in_channels,
+            img_size=img_size,
+            multi_task=False,
+            soft_label=False,
+            pretrained=pretrained,
+        )
+    if model_name == "resnet50":
+        return ResNet50Backbone(
             num_classes=2,
             dropout=dropout,
             in_channels=in_channels,
@@ -318,7 +331,7 @@ class ThermalStructuredFusionModel(nn.Module):
     def set_backbone_trainable(self, trainable: bool) -> None:
         for param in self.thermal_backbone.parameters():
             param.requires_grad = trainable
-        if isinstance(self.thermal_backbone, MobileNetV3Small):
+        if isinstance(self.thermal_backbone, (MobileNetV3Small, ResNet50Backbone)):
             self.thermal_backbone.set_backbone_trainable(trainable)
 
     def forward(self, x_img: Tensor, x_struct: Tensor) -> Tensor | tuple[Tensor, Tensor]:
@@ -381,7 +394,7 @@ class ClinicalResidualFusionModel(nn.Module):
     def set_backbone_trainable(self, trainable: bool) -> None:
         for param in self.thermal_backbone.parameters():
             param.requires_grad = trainable
-        if isinstance(self.thermal_backbone, MobileNetV3Small):
+        if isinstance(self.thermal_backbone, (MobileNetV3Small, ResNet50Backbone)):
             self.thermal_backbone.set_backbone_trainable(trainable)
 
     def forward(self, x_img: Tensor, x_clinical: Tensor) -> Tensor | tuple[Tensor, Tensor]:
@@ -560,7 +573,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet"])
+    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet", "resnet50"])
     parser.add_argument("--no-pretrained", action="store_true", help="Disable pretrained weights for MobileNet")
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity-weighted classification")

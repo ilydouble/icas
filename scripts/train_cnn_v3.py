@@ -943,6 +943,73 @@ class MobileNetV3Small(nn.Module):
         return logits_cls
 
 
+class ResNet50Backbone(nn.Module):
+    """ResNet-50 with optional ImageNet pretraining for thermal inputs."""
+
+    def __init__(
+        self,
+        num_classes: int = 2,
+        dropout: float = 0.3,
+        in_channels: int = 1,
+        img_size: int = 64,
+        multi_task: bool = False,
+        soft_label: bool = False,
+        pretrained: bool = True,
+    ):
+        super().__init__()
+        del img_size
+        self.multi_task = multi_task
+        self.soft_label = soft_label
+        self.in_channels = in_channels
+
+        from torchvision.models import resnet50, ResNet50_Weights
+
+        weights = ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
+        self.backbone = resnet50(weights=weights)
+
+        original_conv = self.backbone.conv1
+        new_conv = nn.Conv2d(
+            in_channels,
+            original_conv.out_channels,
+            kernel_size=original_conv.kernel_size,
+            stride=original_conv.stride,
+            padding=original_conv.padding,
+            bias=False,
+        )
+        if pretrained:
+            with torch.no_grad():
+                if in_channels == 1:
+                    new_conv.weight.data = original_conv.weight.data.mean(dim=1, keepdim=True)
+                elif in_channels == 2:
+                    new_conv.weight.data[:, :2, :, :] = original_conv.weight.data[:, :2, :, :]
+                else:
+                    new_conv.weight.data = original_conv.weight.data.clone()
+        self.backbone.conv1 = new_conv
+
+        feature_dim = self.backbone.fc.in_features
+        self.backbone.fc = nn.Identity()
+
+        cls_out = 1 if soft_label else num_classes
+        self.classifier_head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, cls_out),
+        )
+        if multi_task:
+            self.severity_head = nn.Linear(feature_dim, 1)
+
+    def set_backbone_trainable(self, trainable: bool) -> None:
+        for param in self.backbone.parameters():
+            param.requires_grad = trainable
+
+    def forward(self, x: Tensor) -> Tensor | tuple[Tensor, Tensor]:
+        features = self.backbone(x)
+        logits_cls = self.classifier_head(features)
+        if self.multi_task:
+            logits_sev = self.severity_head(features)
+            return logits_cls, logits_sev
+        return logits_cls
+
+
 def load_excluded_ids(path: Path | None) -> set[str]:
     if not path or not path.exists():
         return set()
@@ -1165,7 +1232,7 @@ def main():
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet"])
+    parser.add_argument("--model", type=str, default="mobilenet", choices=["simple", "deeper", "mobilenet", "resnet50"])
     parser.add_argument("--no-pretrained", action="store_true", help="Disable pretrained weights (for mobilenet)")
     parser.add_argument("--no-mask", action="store_true", help="Disable face masking")
     parser.add_argument("--no-severity", action="store_true", help="Disable severity weighting")
@@ -1260,6 +1327,16 @@ def main():
 
     if args.model == "mobilenet":
         model = MobileNetV3Small(
+            num_classes=2,
+            dropout=args.dropout,
+            in_channels=in_channels,
+            img_size=args.target_size,
+            multi_task=multi_task,
+            soft_label=soft_label,
+            pretrained=not args.no_pretrained,
+        )
+    elif args.model == "resnet50":
+        model = ResNet50Backbone(
             num_classes=2,
             dropout=args.dropout,
             in_channels=in_channels,
