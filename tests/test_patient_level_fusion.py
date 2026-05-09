@@ -2,14 +2,44 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
+import torch
 
 from scripts.evaluate_patient_level_fusion import (
     aggregate_patient_predictions,
     build_sample_metadata_lookup,
+    load_checkpoint_for_inference,
 )
+from scripts.train_cnn_v3 import MobileNetV3Small
+
+
+class CheckpointLoadingTests(unittest.TestCase):
+    def test_load_checkpoint_for_inference_ignores_extra_multitask_head(self):
+        model = MobileNetV3Small(
+            num_classes=2,
+            dropout=0.3,
+            in_channels=1,
+            img_size=64,
+            multi_task=False,
+            soft_label=False,
+            pretrained=False,
+        )
+        original_weight = model.state_dict()["classifier_head.1.weight"].clone()
+        checkpoint_state = dict(model.state_dict())
+        checkpoint_state["severity_head.weight"] = torch.randn(1, 576)
+        checkpoint_state["severity_head.bias"] = torch.randn(1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt_path = Path(tmpdir) / "ckpt.pt"
+            torch.save({"model_state_dict": checkpoint_state}, ckpt_path)
+            checkpoint = load_checkpoint_for_inference(model, ckpt_path, torch.device("cpu"))
+
+        self.assertIn("model_state_dict", checkpoint)
+        self.assertTrue(torch.allclose(model.state_dict()["classifier_head.1.weight"], original_weight))
 
 
 class SampleMetadataTests(unittest.TestCase):

@@ -55,6 +55,32 @@ def build_sample_metadata_lookup(samples: list[dict]) -> dict[str, dict]:
     return lookup
 
 
+def load_checkpoint_for_inference(
+    model: torch.nn.Module,
+    checkpoint_path: Path,
+    device: torch.device,
+) -> dict:
+    """Load only matching inference weights from a training checkpoint."""
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    source_state = checkpoint.get("model_state_dict", checkpoint)
+    target_state = model.state_dict()
+
+    matched: dict[str, torch.Tensor] = {}
+    skipped: list[str] = []
+    for key, value in source_state.items():
+        if key in target_state and tuple(target_state[key].shape) == tuple(value.shape):
+            matched[key] = value
+        else:
+            skipped.append(key)
+
+    target_state.update(matched)
+    model.load_state_dict(target_state)
+
+    if skipped:
+        print(f"Skipped incompatible checkpoint keys: {', '.join(skipped)}")
+    return checkpoint
+
+
 def _safe_logit(prob: float) -> float:
     clipped = float(np.clip(prob, 1e-6, 1.0 - 1e-6))
     return float(np.log(clipped / (1.0 - clipped)))
@@ -256,8 +282,7 @@ def main() -> None:
     )
 
     model = build_model(args).to(device)
-    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    checkpoint = load_checkpoint_for_inference(model, args.checkpoint, device)
 
     multi_task = args.multi_task or args.soft_label
     val_ids, val_labels, val_probs = predict_sample_probabilities(
