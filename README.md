@@ -305,6 +305,62 @@ This script now also evaluates optional 3-way shallow stacking with ASR
 probabilities on the ASR-complete subset, while preserving the original
 thermal+clinical comparisons.
 
+## Frozen DINO Thermal Baseline
+
+To compare a fixed DINO thermal encoder against the current CNN route, first
+extract one feature vector per masked thermal sample:
+
+```bash
+python scripts/extract_dino_thermal_features.py \
+  --model-id facebook/dinov2-base \
+  --output-csv reports/dino_thermal_features.csv
+```
+
+This script reuses the same masked thermal input definition as the CNN
+pipeline, converts each normalized 1-channel heatmap into a 3-channel DINO
+image, and writes:
+
+- `reports/dino_thermal_features.csv`
+- `reports/dino_thermal_features.json`
+
+The resulting `dino_*` columns can then be compared directly against clinical
+variables or fused with them through the same classical-model workflow used by
+the existing deep-feature baseline:
+
+```bash
+python scripts/compare_dino_thermal_clinical.py \
+  --feature-csv reports/dino_thermal_features.csv \
+  --no-search
+```
+
+Useful variants:
+
+```bash
+python scripts/extract_dino_thermal_features.py \
+  --model-id facebook/dinov2-small \
+  --local-files-only \
+  --device cpu
+
+python scripts/compare_dino_thermal_clinical.py \
+  --feature-csv reports/dino_thermal_features.csv \
+  --feature-sets deep_only,fusion
+```
+
+The comparison script evaluates:
+
+- `deep_only`: frozen DINO thermal features only
+- `clinical_only`: screened numeric clinical variables only
+- `fusion`: DINO thermal features plus clinical variables
+
+and writes:
+
+- `reports/dino_thermal_clinical_features_<timestamp>.csv`
+- `reports/dino_thermal_clinical_comparison_<timestamp>.csv`
+
+This route keeps the DINO backbone frozen. In other words, DINO itself is not
+fine-tuned here; only the downstream classical classifier is trained on top of
+the extracted features.
+
 Important: `reports/best_cnn_v3.pt` is just the current checkpoint file path
 and may be overwritten by later runs. When you want to evaluate a specific
 thermal model, pair it with the matching `cnn_v3_results_<timestamp>.json` and
